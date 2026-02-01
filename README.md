@@ -126,9 +126,9 @@ Content-Type: text/plain; charset=utf-8
 
 Выполните:
 
-```
+```bash
 git clone https://github.com/efer92/go-yandex-practicum-metrics
-git checkout INCREMENT_1
+git checkout INCREMENT_2
 ```
 
 Установите зависимости:
@@ -138,38 +138,47 @@ go mod init github.com/efer92/go-yandex-practicum-metrics
 go mod tidy
 ```
 
-Соберите серверную компоненту:
+Соберите серверную и агентскую компоненты:
 
 ```bash
 go build -o server ./cmd/server
+go build -o agent ./cmd/agent
 ```
 
 Запустите сервер:
 
 ```bash
-go build -o server ./cmd/server
+./server
+```
+
+Запустите агент:
+
+```bash
+./agent
+```
+
+Запуcтите тесты:
+
+```bash
+go test -v ./...
+```
+
+Посмотрите покрытие тестами:
+
+```bash
+go test -cover ./...
 ```
 
 Проверки:
 
 ```bash
-check_status() {
-    local url=$1
-    local method=$2
-    local expected=$3
-    local desc=$4
-    
-    status=$(curl -s -o /dev/null -w "%{http_code}" -X "$method" "$url")
-    
-    if [ "$status" -eq "$expected" ]; then
-        echo "✅ $desc: $status (OK)"
-    else
-        echo "❌ $desc: получили $status, ожидали $expected"
-    fi
-}
+ 1. Очисти хранилище (перезапусти сервер)
+ 2. Запусти агента
+ 3. Подожди 30 секунд
+ 4. Проверь, что пришли ВСЕ метрики из списка:
 
-check_status "http://localhost:8080/update/counter/metric/100" "POST" 200 "StatusOK"
-check_status "http://localhost:8080/update/counter//100" "POST" 404 "StatusNotFound (пустое имя)"
-check_status "http://localhost:8080/update/invalid/test/100" "POST" 400 "StatusBadRequest (неверный тип)"
-check_status "http://localhost:8080/update/gauge/test/abc" "POST" 400 "StatusBadRequest (неверное значение)"
+for metric in Alloc BuckHashSys Frees GCCPUFraction GCSys HeapAlloc HeapIdle HeapInuse HeapObjects HeapReleased HeapSys LastGC Lookups MCacheInuse MCacheSys MSpanInuse MSpanSys Mallocs NextGC NumForcedGC NumGC OtherSys PauseTotalNs StackInuse StackSys Sys TotalAlloc RandomValue PollCount; do
+  echo -n "$metric: "
+  curl -s http://localhost:8080/value/gauge/$metric || curl -s http://localhost:8080/value/counter/$metric || echo "NOT FOUND"
+done
 ```
