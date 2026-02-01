@@ -1,3 +1,3 @@
 module github.com/efer92/go-yandex-practicum-metrics
 
-go 1.25.0
+go 1.22
