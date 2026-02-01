@@ -142,6 +142,8 @@ Content-Type: text/plain; charset=utf-8
 
 ```bash
 Флаг -a=<ЗНАЧЕНИЕ> отвечает за адрес эндпоинта HTTP-сервера (по умолчанию localhost:8080).
+
+go run ./cmd/server -a localhost:9090
 ```
 
 Аргументы агента:
@@ -150,6 +152,8 @@ Content-Type: text/plain; charset=utf-8
 Флаг -a=<ЗНАЧЕНИЕ> отвечает за адрес эндпоинта HTTP-сервера (по умолчанию localhost:8080).
 Флаг -r=<ЗНАЧЕНИЕ> позволяет переопределять reportInterval — частоту отправки метрик на сервер (по умолчанию 10 секунд).
 Флаг -p=<ЗНАЧЕНИЕ> позволяет переопределять pollInterval — частоту опроса метрик из пакета runtime (по умолчанию 2 секунды).
+
+go run ./cmd/agent -a localhost:9090 -r 15 -p 10
 ```
 
 При попытке передать приложению незвестные флаги оно должно завершаться с сообщением о соответствующей ошибке.
@@ -164,7 +168,6 @@ Content-Type: text/plain; charset=utf-8
 
 ```bash
 git clone https://github.com/efer92/go-yandex-practicum-metrics
-git checkout INCREMENT_2
 ```
 
 Установите зависимости:
@@ -174,30 +177,25 @@ go mod init github.com/efer92/go-yandex-practicum-metrics
 go mod tidy
 ```
 
-Соберите серверную и агентскую компоненты:
-
-```bash
-go build -o server ./cmd/server
-go build -o agent ./cmd/agent
-```
-
 Запустите сервер:
 
 ```bash
-./server
+go run ./cmd/server -a localhost:9090
 ```
 
 Запустите агент:
 
 ```bash
-./agent
+go run ./cmd/agent -a localhost:9090 -r 15 -p 10
 ```
 
 Откройте в браузере графический интерфейс:
 
 ```bash
-http://localhost:8080/
+http://localhost:9090/ (8080 по-умолчанию)
 ```
+
+![alt text](image.png)
 
 Запуcтите тесты:
 
@@ -209,18 +207,4 @@ go test -v ./...
 
 ```bash
 go test -cover ./...
-```
-
-Проверки:
-
-```bash
- 1. Очисти хранилище (перезапусти сервер)
- 2. Запусти агента
- 3. Подожди 30 секунд
- 4. Проверь, что пришли ВСЕ метрики из списка:
-
-for metric in Alloc BuckHashSys Frees GCCPUFraction GCSys HeapAlloc HeapIdle HeapInuse HeapObjects HeapReleased HeapSys LastGC Lookups MCacheInuse MCacheSys MSpanInuse MSpanSys Mallocs NextGC NumForcedGC NumGC OtherSys PauseTotalNs StackInuse StackSys Sys TotalAlloc RandomValue PollCount; do
-  echo -n "$metric: "
-  curl -s http://localhost:8080/value/gauge/$metric || curl -s http://localhost:8080/value/counter/$metric || echo "NOT FOUND"
-done
 ```

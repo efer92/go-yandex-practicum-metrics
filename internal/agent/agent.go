@@ -5,33 +5,38 @@ import (
     "time"
 )
 
-const (
-    pollInterval   = 2 * time.Second
-    reportInterval = 10 * time.Second
-    serverURL      = "http://localhost:8080"
-)
-
-// Agent координирует сбор и отправку метрик
 type Agent struct {
-    collector *Collector
-    sender    *Sender
+    collector      *Collector
+    sender         *Sender
+    pollInterval   time.Duration
+    reportInterval time.Duration
 }
 
+// New создает агента с дефолтными настройками
 func New() *Agent {
+    return NewWithConfig(
+        "http://localhost:8080",
+        2*time.Second,
+        10*time.Second,
+    )
+}
+
+// NewWithConfig создает агента с кастомными настройками
+func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration) *Agent {
     return &Agent{
-        collector: NewCollector(),
-        sender:    NewSender(serverURL),
+        collector:      NewCollector(),
+        sender:         NewSender(serverURL),
+        pollInterval:   pollInterval,
+        reportInterval: reportInterval,
     }
 }
 
-// Run запускает агента (блокирующий вызов)
 func (a *Agent) Run() {
-    // Первый сбор сразу
     a.collector.Collect()
-    log.Println("Agent started")
+    log.Println("First metrics collected")
 
-    pollTicker := time.NewTicker(pollInterval)
-    reportTicker := time.NewTicker(reportInterval)
+    pollTicker := time.NewTicker(a.pollInterval)
+    reportTicker := time.NewTicker(a.reportInterval)
     defer pollTicker.Stop()
     defer reportTicker.Stop()
 
@@ -43,9 +48,9 @@ func (a *Agent) Run() {
 
         case <-reportTicker.C:
             if err := a.report(); err != nil {
-                log.Printf("Failed to report metrics: %v", err)
+                log.Printf("Failed to report: %v", err)
             } else {
-                log.Println("Metrics reported successfully")
+                log.Println("Metrics reported")
             }
         }
     }
