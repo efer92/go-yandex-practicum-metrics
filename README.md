@@ -140,7 +140,7 @@ Content-Type: text/plain; charset=utf-8
 
 ```bash
 git clone https://github.com/efer92/go-yandex-practicum-metrics
-git checkout INCREMENT_2
+git checkout INCREMENT_3
 ```
 
 Установите зависимости:
@@ -167,6 +167,12 @@ go build -o agent ./cmd/agent
 
 ```bash
 ./agent
+```
+
+Откройте в браузере графический интерфейс:
+
+```bash
+http://localhost:8080/
 ```
 
 Запуcтите тесты:

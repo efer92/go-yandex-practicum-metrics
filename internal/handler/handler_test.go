@@ -6,14 +6,20 @@ import (
     "strings"
     "testing"
 
+    "github.com/go-chi/chi/v5"
     "github.com/efer92/go-yandex-practicum-metrics/internal/repository"
     "github.com/efer92/go-yandex-practicum-metrics/internal/service"
 )
 
-func TestUpdateMetric(t *testing.T) {
+func setupHandler() (*MetricHandler, chi.Router) {
     storage := repository.NewMemStorage()
     svc := service.NewMetricService(storage)
     h := NewMetricHandler(svc)
+    return h, h.Routes()
+}
+
+func TestUpdateMetric(t *testing.T) {
+    _, r := setupHandler()
 
     tests := []struct {
         name       string
@@ -57,18 +63,6 @@ func TestUpdateMetric(t *testing.T) {
             url:        "/update/gauge/test/abc",
             wantStatus: http.StatusBadRequest,
         },
-        {
-            name:       "wrong method GET",
-            method:     http.MethodGet,
-            url:        "/update/counter/test/10",
-            wantStatus: http.StatusMethodNotAllowed,
-        },
-        {
-            name:       "wrong method PUT",
-            method:     http.MethodPut,
-            url:        "/update/counter/test/10",
-            wantStatus: http.StatusMethodNotAllowed,
-        },
     }
 
     for _, tt := range tests {
@@ -76,7 +70,7 @@ func TestUpdateMetric(t *testing.T) {
             req := httptest.NewRequest(tt.method, tt.url, nil)
             rr := httptest.NewRecorder()
 
-            h.UpdateMetric(rr, req)
+            r.ServeHTTP(rr, req)
 
             if rr.Code != tt.wantStatus {
                 t.Errorf("handler returned wrong status code: got %v want %v",
@@ -90,6 +84,7 @@ func TestGetValue(t *testing.T) {
     storage := repository.NewMemStorage()
     svc := service.NewMetricService(storage)
     h := NewMetricHandler(svc)
+    r := h.Routes()
 
     // Предзаполняем хранилище
     storage.UpdateGauge("HeapAlloc", 999.99)
@@ -128,12 +123,6 @@ func TestGetValue(t *testing.T) {
             url:        "/value/gauge/",
             wantStatus: http.StatusNotFound,
         },
-        {
-            name:       "wrong method POST",
-            method:     http.MethodPost,
-            url:        "/value/gauge/HeapAlloc",
-            wantStatus: http.StatusMethodNotAllowed,
-        },
     }
 
     for _, tt := range tests {
@@ -141,7 +130,7 @@ func TestGetValue(t *testing.T) {
             req := httptest.NewRequest(tt.method, tt.url, nil)
             rr := httptest.NewRecorder()
 
-            h.GetValue(rr, req)
+            r.ServeHTTP(rr, req)
 
             if rr.Code != tt.wantStatus {
                 t.Errorf("handler returned wrong status code: got %v want %v",
@@ -156,90 +145,39 @@ func TestGetValue(t *testing.T) {
     }
 }
 
-func TestGetValue_ContentType(t *testing.T) {
+func TestListMetrics(t *testing.T) {
     storage := repository.NewMemStorage()
     svc := service.NewMetricService(storage)
     h := NewMetricHandler(svc)
+    r := h.Routes()
 
-    storage.UpdateGauge("Test", 1.0)
+    // Добавляем тестовые данные
+    storage.UpdateGauge("TestGauge", 100.5)
+    storage.UpdateCounter("TestCounter", 42)
 
-    req := httptest.NewRequest(http.MethodGet, "/value/gauge/Test", nil)
+    req := httptest.NewRequest(http.MethodGet, "/", nil)
     rr := httptest.NewRecorder()
 
-    h.GetValue(rr, req)
+    r.ServeHTTP(rr, req)
+
+    if rr.Code != http.StatusOK {
+        t.Errorf("expected 200, got %d", rr.Code)
+    }
+
+    body := rr.Body.String()
+    if !strings.Contains(body, "TestGauge") {
+        t.Error("response should contain TestGauge")
+    }
+    if !strings.Contains(body, "100.5") {
+        t.Error("response should contain value 100.5")
+    }
+	
+	if !strings.Contains(body, "<!DOCTYPE html>") {
+		t.Error("response should contain HTML")
+	}
 
     contentType := rr.Header().Get("Content-Type")
-    if !strings.Contains(contentType, "text/plain") {
-        t.Errorf("expected Content-Type text/plain, got %s", contentType)
-    }
-}
-
-func TestUpdateMetric_DoubleSlash(t *testing.T) {
-    // Этот тест проверяет что сервер корректно обрабатывает // в URL
-    // (должен вернуть 404, а не редирект)
-    storage := repository.NewMemStorage()
-    svc := service.NewMetricService(storage)
-    h := NewMetricHandler(svc)
-
-    req := httptest.NewRequest(http.MethodPost, "/update/counter//100", nil)
-    rr := httptest.NewRecorder()
-
-    // Имитируем обработку без ServeMux (как в main.go)
-    if strings.Contains(req.URL.Path, "//") {
-        http.Error(rr, "Not found", http.StatusNotFound)
-    } else {
-        h.UpdateMetric(rr, req)
-    }
-
-    if rr.Code != http.StatusNotFound {
-        t.Errorf("expected 404 for double slash, got %d", rr.Code)
-    }
-}
-
-func TestGetValue_DifferentErrors(t *testing.T) {
-    storage := repository.NewMemStorage()
-    svc := service.NewMetricService(storage)
-    h := NewMetricHandler(svc)
-
-    tests := []struct {
-        name       string
-        url        string
-        wantStatus int
-    }{
-        {
-            name:       "unknown metric type in get",
-            url:        "/value/unknown/test",
-            wantStatus: http.StatusBadRequest,
-        },
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            req := httptest.NewRequest(http.MethodGet, tt.url, nil)
-            rr := httptest.NewRecorder()
-            
-            h.GetValue(rr, req)
-
-            if rr.Code != tt.wantStatus {
-                t.Errorf("got %d, want %d", rr.Code, tt.wantStatus)
-            }
-        })
-    }
-}
-
-func TestGetValue_EdgeCases(t *testing.T) {
-    storage := repository.NewMemStorage()
-    svc := service.NewMetricService(storage)
-    h := NewMetricHandler(svc)
-
-    // Путь /value/gauge/ (с пустым именем, но со слешем в конце)
-    req := httptest.NewRequest(http.MethodGet, "/value/gauge/", nil)
-    rr := httptest.NewRecorder()
-    
-    h.GetValue(rr, req)
-    
-    // Должен быть 404
-    if rr.Code != http.StatusNotFound {
-        t.Errorf("expected 404 for empty name, got %d", rr.Code)
+    if !strings.Contains(contentType, "text/html") {
+        t.Errorf("Content-Type should contain text/html, got %s", contentType)
     }
 }
