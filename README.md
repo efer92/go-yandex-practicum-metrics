@@ -169,6 +169,12 @@ go build -o agent ./cmd/agent
 ./agent
 ```
 
+Откройте в браузере графический интерфейс:
+
+```bash
+http://localhost:8080/
+```
+
 Запуcтите тесты:
 
 ```bash
