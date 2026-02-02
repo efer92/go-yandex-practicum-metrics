@@ -1,77 +1,77 @@
 package handler
 
 import (
-    "html/template"
-    "net/http"
-    "sort"
-    "strings"
+	"html/template"
+	"net/http"
+	"sort"
+	"strings"
 
-    "github.com/go-chi/chi/v5"
-    "github.com/efer92/go-yandex-practicum-metrics/internal/service"
+	"github.com/efer92/go-yandex-practicum-metrics/internal/service"
+	"github.com/go-chi/chi/v5"
 )
 
 type MetricHandler struct {
-    svc *service.MetricService
+	svc *service.MetricService
 }
 
 func NewMetricHandler(svc *service.MetricService) *MetricHandler {
-    return &MetricHandler{svc: svc}
+	return &MetricHandler{svc: svc}
 }
 
 func (h *MetricHandler) Routes() chi.Router {
-    r := chi.NewRouter()
-    r.Post("/update/{type}/{name}/{value}", h.UpdateMetric)
-    r.Get("/value/{type}/{name}", h.GetValue)
-    r.Get("/", h.ListMetrics)
-    return r
+	r := chi.NewRouter()
+	r.Post("/update/{type}/{name}/{value}", h.UpdateMetric)
+	r.Get("/value/{type}/{name}", h.GetValue)
+	r.Get("/", h.ListMetrics)
+	return r
 }
 
 func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
-    mType := chi.URLParam(r, "type")
-    name := chi.URLParam(r, "name")
-    value := chi.URLParam(r, "value")
+	mType := chi.URLParam(r, "type")
+	name := chi.URLParam(r, "name")
+	value := chi.URLParam(r, "value")
 
-    if name == "" {
-        http.NotFound(w, r)
-        return
-    }
+	if name == "" {
+		http.NotFound(w, r)
+		return
+	}
 
-    if err := h.svc.UpdateMetric(mType, name, value); err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
-        return
-    }
+	if err := h.svc.UpdateMetric(mType, name, value); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-    w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *MetricHandler) GetValue(w http.ResponseWriter, r *http.Request) {
-    mType := chi.URLParam(r, "type")
-    name := chi.URLParam(r, "name")
+	mType := chi.URLParam(r, "type")
+	name := chi.URLParam(r, "name")
 
-    if name == "" {
-        http.NotFound(w, r)
-        return
-    }
+	if name == "" {
+		http.NotFound(w, r)
+		return
+	}
 
-    val, err := h.svc.GetValue(mType, name)
-    if err != nil {
-        if err.Error() == "metric not found" {
-            http.Error(w, err.Error(), http.StatusNotFound)
-        } else {
-            http.Error(w, err.Error(), http.StatusBadRequest)
-        }
-        return
-    }
+	val, err := h.svc.GetValue(mType, name)
+	if err != nil {
+		if err.Error() == "metric not found" {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
 
-    w.Header().Set("Content-Type", "text/plain")
-    w.WriteHeader(http.StatusOK)
-    w.Write([]byte(val))
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(val))
 }
 
 type MetricView struct {
-    Type  string
-    Name  string
-    Value string
+	Type  string
+	Name  string
+	Value string
 }
 
 // HTML-шаблон
@@ -269,37 +269,37 @@ const htmlTemplate = `
 `
 
 func (h *MetricHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
-    metrics := h.svc.GetAllMetrics()
+	metrics := h.svc.GetAllMetrics()
 
-    var data []MetricView
+	var data []MetricView
 
-    // Разбираем ключи "type/name"
-    for key, val := range metrics {
-        parts := strings.SplitN(key, "/", 2)
-        if len(parts) == 2 {
-            data = append(data, MetricView{
-                Type:  parts[0],
-                Name:  parts[1],
-                Value: val,
-            })
-        }
-    }
+	// Разбираем ключи "type/name"
+	for key, val := range metrics {
+		parts := strings.SplitN(key, "/", 2)
+		if len(parts) == 2 {
+			data = append(data, MetricView{
+				Type:  parts[0],
+				Name:  parts[1],
+				Value: val,
+			})
+		}
+	}
 
-    // СОРТИРОВКА: сначала по типу (counter перед gauge), потом по имени
-    sort.Slice(data, func(i, j int) bool {
-        if data[i].Type != data[j].Type {
-            return data[i].Type < data[j].Type // counter < gauge (по алфавиту)
-        }
-        return data[i].Name < data[j].Name // внутри типа по алфавиту
-    })
+	// СОРТИРОВКА: сначала по типу (counter перед gauge), потом по имени
+	sort.Slice(data, func(i, j int) bool {
+		if data[i].Type != data[j].Type {
+			return data[i].Type < data[j].Type // counter < gauge (по алфавиту)
+		}
+		return data[i].Name < data[j].Name // внутри типа по алфавиту
+	})
 
-    tmpl, err := template.New("metrics").Parse(htmlTemplate)
-    if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
+	tmpl, err := template.New("metrics").Parse(htmlTemplate)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    w.Header().Set("Content-Type", "text/html; charset=utf-8")
-    w.WriteHeader(http.StatusOK)
-    tmpl.Execute(w, data)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	tmpl.Execute(w, data)
 }
