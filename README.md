@@ -37,98 +37,13 @@ Content-Length: 11
 Content-Type: text/plain; charset=utf-8
 ```
 
-## Инкремент 2
-
-Разработайте агент (HTTP-клиент) для сбора рантайм-метрик и их последующей отправки на сервер по протоколу HTTP.
-Агент должен собирать метрики двух типов:
-
-```bash
-Тип gauge, float64.
-Тип counter, int64.
-```
-
-В качестве источника метрик используйте пакет runtime.
-
-Нужно собирать следующие метрики типа gauge:
-
-```bash
-Alloc
-BuckHashSys
-Frees
-GCCPUFraction
-GCSys
-HeapAlloc
-HeapIdle
-HeapInuse
-HeapObjects
-HeapReleased
-HeapSys
-LastGC
-Lookups
-MCacheInuse
-MCacheSys
-MSpanInuse
-MSpanSys
-Mallocs
-NextGC
-NumForcedGC
-NumGC
-OtherSys
-PauseTotalNs
-StackInuse
-StackSys
-Sys
-TotalAlloc
-```
-
-К метрикам пакета runtime добавьте ещё две:
-
-```bash
-PollCount (тип counter) — счётчик, увеличивающийся на 1 при каждом обновлении метрики из пакета runtime (на каждый pollInterval — см. ниже).
-RandomValue (тип gauge) — обновляемое произвольное значение.
-```
-
-По умолчанию приложение должно:
-Обновлять метрики из пакета runtime с заданной частотой: pollInterval — 2 секунды.
-Отправлять метрики на сервер с заданной частотой: reportInterval — 10 секунд.
-
-Чтобы приостанавливать работу функции на заданное время, используйте вызов time.Sleep(n * time.Second). Подробнее о пакете time и его возможностях вы узнаете в третьем спринте.
-
-Метрики нужно отправлять по протоколу HTTP методом POST:
-
-```bash
-Формат данных — http://<АДРЕС_СЕРВЕРА>/update/<ТИП_МЕТРИКИ>/<ИМЯ_МЕТРИКИ>/<ЗНАЧЕНИЕ_МЕТРИКИ>.
-Адрес сервера — http://localhost:8080.
-Заголовок — Content-Type: text/plain.
-```
-
-Пример запроса к серверу:
-
-```bash
-POST /update/counter/someMetric/527 HTTP/1.1
-Host: localhost:8080
-Content-Length: 0
-Content-Type: text/plain 
-```
-
-Пример ответа от сервера:
-
-```bash
-HTTP/1.1 200 OK
-Date: Tue, 21 Feb 2023 02:51:35 GMT
-Content-Length: 11
-Content-Type: text/plain; charset=utf-8 
-```
-
-Покройте код агента и сервера юнит-тестами.
-
 ## Начало работы
 
 Выполните:
 
 ```bash
 git clone https://github.com/efer92/go-yandex-practicum-metrics
-git checkout INCREMENT_2
+git checkout INCREMENT_1
 ```
 
 Установите зависимости:
@@ -138,11 +53,10 @@ go mod init github.com/efer92/go-yandex-practicum-metrics
 go mod tidy
 ```
 
-Соберите серверную и агентскую компоненты:
+Соберите серверную компоненту:
 
 ```bash
 go build -o server ./cmd/server
-go build -o agent ./cmd/agent
 ```
 
 Запустите сервер:
@@ -151,34 +65,26 @@ go build -o agent ./cmd/agent
 ./server
 ```
 
-Запустите агент:
-
-```bash
-./agent
-```
-
-Запуcтите тесты:
-
-```bash
-go test -v ./...
-```
-
-Посмотрите покрытие тестами:
-
-```bash
-go test -cover ./...
-```
-
 Проверки:
 
 ```bash
- 1. Очисти хранилище (перезапусти сервер)
- 2. Запусти агента
- 3. Подожди 30 секунд
- 4. Проверь, что пришли ВСЕ метрики из списка:
+check_status() {
+    local url=$1
+    local method=$2
+    local expected=$3
+    local desc=$4
+    
+    status=$(curl -s -o /dev/null -w "%{http_code}" -X "$method" "$url")
+    
+    if [ "$status" -eq "$expected" ]; then
+        echo "✅ $desc: $status (OK)"
+    else
+        echo "❌ $desc: получили $status, ожидали $expected"
+    fi
+}
 
-for metric in Alloc BuckHashSys Frees GCCPUFraction GCSys HeapAlloc HeapIdle HeapInuse HeapObjects HeapReleased HeapSys LastGC Lookups MCacheInuse MCacheSys MSpanInuse MSpanSys Mallocs NextGC NumForcedGC NumGC OtherSys PauseTotalNs StackInuse StackSys Sys TotalAlloc RandomValue PollCount; do
-  echo -n "$metric: "
-  curl -s http://localhost:8080/value/gauge/$metric || curl -s http://localhost:8080/value/counter/$metric || echo "NOT FOUND"
-done
+check_status "http://localhost:8080/update/counter/metric/100" "POST" 200 "StatusOK"
+check_status "http://localhost:8080/update/counter//100" "POST" 404 "StatusNotFound (пустое имя)"
+check_status "http://localhost:8080/update/invalid/test/100" "POST" 400 "StatusBadRequest (неверный тип)"
+check_status "http://localhost:8080/update/gauge/test/abc" "POST" 400 "StatusBadRequest (неверное значение)"
 ```
