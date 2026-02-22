@@ -1,31 +1,40 @@
 package main
 
 import (
-	"log"
-	"net/http"
-	"os"
+    "flag"
+    "log"
+    "net/http"
 
-	"github.com/efer92/go-yandex-practicum-metrics/internal/handler"
-	"github.com/efer92/go-yandex-practicum-metrics/internal/repository"
-	"github.com/efer92/go-yandex-practicum-metrics/internal/service"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+    "github.com/go-chi/chi/v5"
+    "github.com/go-chi/chi/v5/middleware"
+    "github.com/efer92/go-yandex-practicum-metrics/internal/handler"
+    "github.com/efer92/go-yandex-practicum-metrics/internal/repository"
+    "github.com/efer92/go-yandex-practicum-metrics/internal/service"
 )
 
+var (
+    flagAddr string
+)
+
+func parseFlags() {
+    flag.StringVar(&flagAddr, "a", "localhost:8080", "HTTP server address")
+    flag.Parse()
+}
+
 func main() {
-	cfg := parseConfig(os.Args[1:])
+    parseFlags()
 
-	storage := repository.NewMemStorage()
-	svc := service.NewMetricService(storage)
-	h := handler.NewMetricHandler(svc)
+    storage := repository.NewMemStorage()
+    svc := service.NewMetricService(storage)
+    h := handler.NewMetricHandler(svc)
 
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Mount("/", h.Routes())
+    r := chi.NewRouter()
+    r.Use(middleware.Logger)
+    r.Use(middleware.Recoverer)
+    r.Mount("/", h.Routes())
 
-	log.Printf("Server starting on %s", cfg.Addr)
-	if err := http.ListenAndServe(cfg.Addr, r); err != nil {
-		log.Fatal(err)
-	}
+    log.Printf("Server starting on %s", flagAddr)
+    if err := http.ListenAndServe(flagAddr, r); err != nil {
+        log.Fatal(err)
+    }
 }
