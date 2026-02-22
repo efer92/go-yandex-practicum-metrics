@@ -28,7 +28,8 @@ func main() {
 	h := handler.NewMetricHandler(svc)
 
 	r := chi.NewRouter()
-	r.Use(custommiddleware.Logger(logger)) // наш zap-логгер
+	r.Use(custommiddleware.Logger(logger))   // zap-логгер
+	r.Use(custommiddleware.GzipMiddleware)    // gzip сжатие/распаковка
 	r.Use(middleware.Recoverer)
 	r.Mount("/", h.Routes())
 

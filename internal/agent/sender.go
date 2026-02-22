@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -36,11 +37,28 @@ func (s *Sender) send(m model.Metrics) error {
 		return fmt.Errorf("marshal metric: %w", err)
 	}
 
-	resp, err := s.httpClient.Post(
-		s.serverURL+"/update",
-		"application/json",
-		bytes.NewBuffer(body),
-	)
+	// Сжимаем тело запроса
+	var buf bytes.Buffer
+	gz, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+	if err != nil {
+		return fmt.Errorf("create gzip writer: %w", err)
+	}
+	if _, err = gz.Write(body); err != nil {
+		return fmt.Errorf("gzip write: %w", err)
+	}
+	if err = gz.Close(); err != nil {
+		return fmt.Errorf("gzip close: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, s.serverURL+"/update", &buf)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send metric %s: %w", m.ID, err)
 	}
