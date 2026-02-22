@@ -1,39 +1,25 @@
 package main
 
 import (
-    "flag"
-    "log"
-    "time"
+	"log"
+	"os"
+	"time"
 
-    "github.com/efer92/go-yandex-practicum-metrics/internal/agent"
+	"github.com/efer92/go-yandex-practicum-metrics/internal/agent"
 )
-
-var (
-    flagAddr           string
-    flagReportInterval int
-    flagPollInterval   int
-)
-
-func parseFlags() {
-    flag.StringVar(&flagAddr, "a", "localhost:8080", "HTTP server address")
-    flag.IntVar(&flagReportInterval, "r", 10, "Report interval in seconds")
-    flag.IntVar(&flagPollInterval, "p", 2, "Poll interval in seconds")
-    flag.Parse()
-}
 
 func main() {
-    parseFlags()
+	cfg := parseConfig(os.Args[1:])
 
-    // Формируем URL сервера
-    serverURL := "http://" + flagAddr
+	serverURL := "http://" + cfg.Addr
 
-    ag := agent.NewWithConfig(
-        serverURL,
-        time.Duration(flagPollInterval)*time.Second,
-        time.Duration(flagReportInterval)*time.Second,
-    )
+	ag := agent.NewWithConfig(
+		serverURL,
+		time.Duration(cfg.PollInterval)*time.Second,
+		time.Duration(cfg.ReportInterval)*time.Second,
+	)
 
-    log.Printf("Agent started (server: %s, poll: %ds, report: %ds)",
-        flagAddr, flagPollInterval, flagReportInterval)
-    ag.Run()
+	log.Printf("Agent started (server: %s, poll: %ds, report: %ds)",
+		cfg.Addr, cfg.PollInterval, cfg.ReportInterval)
+	ag.Run()
 }
