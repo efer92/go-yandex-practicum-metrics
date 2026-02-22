@@ -63,7 +63,9 @@ func TestUpdateMetricJSON_Counter(t *testing.T) {
 	body, _ := json.Marshal(m)
 
 	// Отправляем дважды — счётчик должен накопиться
-	http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	firstResp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	firstResp.Body.Close()
 	body, _ = json.Marshal(m)
 	resp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
 	require.NoError(t, err)
@@ -130,7 +132,9 @@ func TestGetValueJSON_Gauge(t *testing.T) {
 	// Сначала сохраняем
 	val := 99.9
 	body, _ := json.Marshal(model.Metrics{ID: "Alloc", MType: model.Gauge, Value: &val})
-	http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	setupResp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	setupResp.Body.Close()
 
 	// Запрашиваем
 	body, _ = json.Marshal(model.Metrics{ID: "Alloc", MType: model.Gauge})
@@ -167,7 +171,9 @@ func TestGetValueJSON_Counter(t *testing.T) {
 
 	delta := int64(5)
 	body, _ := json.Marshal(model.Metrics{ID: "PollCount", MType: model.Counter, Delta: &delta})
-	http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	setupResp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	setupResp.Body.Close()
 
 	body, _ = json.Marshal(model.Metrics{ID: "PollCount", MType: model.Counter})
 	resp, err := http.Post(srv.URL+"/value", "application/json", bytes.NewBuffer(body))
@@ -201,7 +207,9 @@ func TestGetValue_TextPlain(t *testing.T) {
 	srv := newTestServer(h)
 	defer srv.Close()
 
-	http.Post(srv.URL+"/update/gauge/TestMetric/42.5", "text/plain", nil)
+	setupResp, err := http.Post(srv.URL+"/update/gauge/TestMetric/42.5", "text/plain", nil)
+	require.NoError(t, err)
+	setupResp.Body.Close()
 
 	resp, err := http.Get(srv.URL + "/value/gauge/TestMetric")
 	require.NoError(t, err)
