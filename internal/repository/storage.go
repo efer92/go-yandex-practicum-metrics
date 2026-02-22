@@ -12,6 +12,8 @@ type Storage interface {
     UpdateCounter(name string, value int64) error
     GetMetric(name string, mType string) (*model.Metrics, bool)
     GetValue(mType string, name string) (string, bool)
+    
+    GetAllMetrics() map[string]string // ключ: "type/name", значение: string(value)
 }
 
 type MemStorage struct {
@@ -81,4 +83,21 @@ func (s *MemStorage) GetValue(mType string, name string) (string, bool) {
         }
     }
     return "", false
+}
+
+func (s *MemStorage) GetAllMetrics() map[string]string {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+    
+    result := make(map[string]string)
+    
+    for name, val := range s.gauges {
+        result["gauge/"+name] = strconv.FormatFloat(val, 'f', -1, 64)
+    }
+    
+    for name, val := range s.counters {
+        result["counter/"+name] = strconv.FormatInt(val, 10)
+    }
+    
+    return result
 }

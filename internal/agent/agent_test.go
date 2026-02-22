@@ -148,7 +148,7 @@ func TestAgent_Report(t *testing.T) {
 }
 
 func TestSender_SendBatch_Error(t *testing.T) {
-    // Сервер который падает на первом же запросе
+    // Падает на первом же запросе
     callCount := 0
     server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         callCount++

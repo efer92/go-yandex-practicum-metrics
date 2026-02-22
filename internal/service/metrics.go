@@ -51,3 +51,7 @@ func (s *MetricService) GetValue(mType, name string) (string, error) {
     }
     return "", errors.New("metric not found")
 }
+
+func (s *MetricService) GetAllMetrics() map[string]string {
+    return s.storage.GetAllMetrics()
+}

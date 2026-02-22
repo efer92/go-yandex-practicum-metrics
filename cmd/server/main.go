@@ -3,8 +3,9 @@ package main
 import (
     "log"
     "net/http"
-	"strings"
 
+    "github.com/go-chi/chi/v5"
+    "github.com/go-chi/chi/v5/middleware"
     "github.com/efer92/go-yandex-practicum-metrics/internal/handler"
     "github.com/efer92/go-yandex-practicum-metrics/internal/repository"
     "github.com/efer92/go-yandex-practicum-metrics/internal/service"
@@ -15,22 +16,17 @@ func main() {
     svc := service.NewMetricService(storage)
     h := handler.NewMetricHandler(svc)
 
-    mux := http.NewServeMux()
-    mux.HandleFunc("/update/", h.UpdateMetric)
-    mux.HandleFunc("/value/", h.GetValue)
+    r := chi.NewRouter()
+    
+    // Middleware
+    r.Use(middleware.Logger)
+    r.Use(middleware.Recoverer)
+    
+    // Routes
+    r.Mount("/", h.Routes())
 
-	// Проверяем URL до того, как передать в ServeMux
-	// Обработка двойных слэшей в URL, иначе редирект
-    handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // Проверяем наличие двойных слешей
-        if strings.Contains(r.URL.Path, "//") {
-            http.Error(w, "Not found", http.StatusNotFound)
-            return
-        }
-        mux.ServeHTTP(w, r)
-    })
     log.Println("Server starting on :8080")
-    if err := http.ListenAndServe(":8080", handler); err != nil {
+    if err := http.ListenAndServe(":8080", r); err != nil {
         log.Fatal(err)
     }
 }

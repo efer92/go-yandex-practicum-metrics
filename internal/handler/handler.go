@@ -1,9 +1,12 @@
 package handler
 
 import (
+    "html/template"
     "net/http"
+    "sort"
     "strings"
 
+    "github.com/go-chi/chi/v5"
     "github.com/efer92/go-yandex-practicum-metrics/internal/service"
 )
 
@@ -15,23 +18,18 @@ func NewMetricHandler(svc *service.MetricService) *MetricHandler {
     return &MetricHandler{svc: svc}
 }
 
+func (h *MetricHandler) Routes() chi.Router {
+    r := chi.NewRouter()
+    r.Post("/update/{type}/{name}/{value}", h.UpdateMetric)
+    r.Get("/value/{type}/{name}", h.GetValue)
+    r.Get("/", h.ListMetrics)
+    return r
+}
+
 func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
-
-    path := strings.Trim(r.URL.Path, "/")
-    parts := strings.Split(path, "/")
-
-    if len(parts) != 4 || parts[0] != "update" {
-        http.Error(w, "Not found", http.StatusNotFound)
-        return
-    }
-
-    mType := parts[1]
-    name := parts[2]
-    value := parts[3]
+    mType := chi.URLParam(r, "type")
+    name := chi.URLParam(r, "name")
+    value := chi.URLParam(r, "value")
 
     if name == "" {
         http.NotFound(w, r)
@@ -47,21 +45,8 @@ func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MetricHandler) GetValue(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodGet {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
-
-    path := strings.Trim(r.URL.Path, "/")
-    parts := strings.Split(path, "/")
-
-    if len(parts) != 3 || parts[0] != "value" {
-        http.Error(w, "Not found", http.StatusNotFound)
-        return
-    }
-
-    mType := parts[1]
-    name := parts[2]
+    mType := chi.URLParam(r, "type")
+    name := chi.URLParam(r, "name")
 
     if name == "" {
         http.NotFound(w, r)
@@ -81,4 +66,240 @@ func (h *MetricHandler) GetValue(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "text/plain")
     w.WriteHeader(http.StatusOK)
     w.Write([]byte(val))
+}
+
+type MetricView struct {
+    Type  string
+    Name  string
+    Value string
+}
+
+// HTML-шаблон
+const htmlTemplate = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metrics Dashboard</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 40px 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+            position: relative;
+        }
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 2.5em;
+            font-weight: 300;
+            letter-spacing: 1px;
+        }
+        .subtitle {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 25px;
+            flex-wrap: wrap;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 0.9em;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .content {
+            padding: 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        thead {
+            background: #f8f9fa;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        th {
+            padding: 20px;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+            text-transform: uppercase;
+            font-size: 0.8em;
+            letter-spacing: 1px;
+        }
+        td {
+            padding: 16px 20px;
+            border-bottom: 1px solid #e9ecef;
+            vertical-align: middle;
+        }
+        tr {
+            transition: all 0.2s;
+        }
+        tr:hover {
+            background-color: #f8f9fa;
+            transform: scale(1.01);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .badge-gauge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .badge-counter {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        .metric-name {
+            font-weight: 600;
+            color: #2d3748;
+            font-size: 1.05em;
+        }
+        .metric-value {
+            font-family: 'Courier New', Consolas, monospace;
+            font-weight: 700;
+            color: #1a202c;
+            background: #edf2f7;
+            padding: 6px 12px;
+            border-radius: 6px;
+            display: inline-block;
+            font-size: 0.95em;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 80px 40px;
+            color: #718096;
+        }
+        .empty-state h3 {
+            margin: 0 0 10px 0;
+            color: #2d3748;
+            font-size: 1.5em;
+        }
+        .counter-badge {
+            background: rgba(255,255,255,0.2);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Metrics Dashboard</h1>
+            <div class="subtitle">Real-time monitoring</div>
+            <div class="stats">
+                <div class="stat-card">Total: <strong>{{len .}}</strong> metrics</div>
+                <div class="stat-card">Gauge Metrics</div>
+                <div class="stat-card">Counter Metrics</div>
+            </div>
+        </div>
+        <div class="content">
+            {{if .}}
+            <table>
+                <thead>
+                    <tr>
+                        <th width="120">Type</th>
+                        <th>Metric Name</th>
+                        <th width="200">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .}}
+                    <tr>
+                        <td>
+                            {{if eq .Type "gauge"}}
+                            <span class="badge badge-gauge">Gauge</span>
+                            {{else}}
+                            <span class="badge badge-counter">Counter</span>
+                            {{end}}
+                        </td>
+                        <td class="metric-name">{{.Name}}</td>
+                        <td><span class="metric-value">{{.Value}}</span></td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+            {{else}}
+            <div class="empty-state">
+                <h3>No metrics available</h3>
+                <p>Metrics will appear here once the agent sends data.</p>
+            </div>
+            {{end}}
+        </div>
+    </div>
+</body>
+</html>
+`
+
+func (h *MetricHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
+    metrics := h.svc.GetAllMetrics()
+
+    var data []MetricView
+
+    // Разбираем ключи "type/name"
+    for key, val := range metrics {
+        parts := strings.SplitN(key, "/", 2)
+        if len(parts) == 2 {
+            data = append(data, MetricView{
+                Type:  parts[0],
+                Name:  parts[1],
+                Value: val,
+            })
+        }
+    }
+
+    // СОРТИРОВКА: сначала по типу (counter перед gauge), потом по имени
+    sort.Slice(data, func(i, j int) bool {
+        if data[i].Type != data[j].Type {
+            return data[i].Type < data[j].Type // counter < gauge (по алфавиту)
+        }
+        return data[i].Name < data[j].Name // внутри типа по алфавиту
+    })
+
+    tmpl, err := template.New("metrics").Parse(htmlTemplate)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    w.WriteHeader(http.StatusOK)
+    tmpl.Execute(w, data)
 }
