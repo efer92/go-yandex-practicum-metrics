@@ -23,15 +23,18 @@ func NewMetricHandler(svc *service.MetricService) *MetricHandler {
 func (h *MetricHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
+	r.Get("/", h.ListMetrics)
+
+	// JSON эндпоинты — регистрируем до параметризованных
+	r.Post("/update", h.UpdateMetricJSON)
+	r.Post("/update/", h.UpdateMetricJSON)
+	r.Post("/value", h.GetValueJSON)
+	r.Post("/value/", h.GetValueJSON)
+
 	// text/plain эндпоинты (старые)
 	r.Post("/update/{type}/{name}/{value}", h.UpdateMetric)
 	r.Get("/value/{type}/{name}", h.GetValue)
 
-	// JSON эндпоинты (новые)
-	r.Post("/update", h.UpdateMetricJSON)
-	r.Post("/value", h.GetValueJSON)
-
-	r.Get("/", h.ListMetrics)
 	return r
 }
 
