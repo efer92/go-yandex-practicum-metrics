@@ -134,13 +134,40 @@ Content-Type: text/plain; charset=utf-8
 
 Хендлеры должны взаимодействовать с экземпляром MemStorage при помощи соответствующих интерфейсных методов.
 
+## Инкремент 4
+
+Доработайте код, чтобы он умел принимать аргументы с использованием флагов.
+
+Аргументы сервера:
+
+```bash
+Флаг -a=<ЗНАЧЕНИЕ> отвечает за адрес эндпоинта HTTP-сервера (по умолчанию localhost:8080).
+
+go run ./cmd/server -a localhost:9090
+```
+
+Аргументы агента:
+
+```bash
+Флаг -a=<ЗНАЧЕНИЕ> отвечает за адрес эндпоинта HTTP-сервера (по умолчанию localhost:8080).
+Флаг -r=<ЗНАЧЕНИЕ> позволяет переопределять reportInterval — частоту отправки метрик на сервер (по умолчанию 10 секунд).
+Флаг -p=<ЗНАЧЕНИЕ> позволяет переопределять pollInterval — частоту опроса метрик из пакета runtime (по умолчанию 2 секунды).
+
+go run ./cmd/agent -a localhost:9090 -r 15 -p 10
+```
+
+При попытке передать приложению незвестные флаги оно должно завершаться с сообщением о соответствующей ошибке.
+
+Значения интервалов времени должны задаваться в секундах.
+
+Во всех случаях должны присутствовать значения по умолчанию.
+
 ## Начало работы
 
 Выполните:
 
 ```bash
 git clone https://github.com/efer92/go-yandex-practicum-metrics
-git checkout INCREMENT_3
 ```
 
 Установите зависимости:
@@ -150,29 +177,25 @@ go mod init github.com/efer92/go-yandex-practicum-metrics
 go mod tidy
 ```
 
-Соберите серверную компоненту:
-
-```bash
-go build -o server ./cmd/server
-```
-
 Запустите сервер:
 
 ```bash
-./server
+go run ./cmd/server -a localhost:9090
 ```
 
 Запустите агент:
 
 ```bash
-./agent
+go run ./cmd/agent -a localhost:9090 -r 15 -p 10
 ```
 
 Откройте в браузере графический интерфейс:
 
 ```bash
-http://localhost:8080/
+http://localhost:9090/ (8080 по-умолчанию)
 ```
+
+![alt text](image.png)
 
 Запуcтите тесты:
 
@@ -184,28 +207,4 @@ go test -v ./...
 
 ```bash
 go test -cover ./...
-```
-
-Проверки:
-
-```bash
-check_status() {
-    local url=$1
-    local method=$2
-    local expected=$3
-    local desc=$4
-    
-    status=$(curl -s -o /dev/null -w "%{http_code}" -X "$method" "$url")
-    
-    if [ "$status" -eq "$expected" ]; then
-        echo "✅ $desc: $status (OK)"
-    else
-        echo "❌ $desc: получили $status, ожидали $expected"
-    fi
-}
-
-check_status "http://localhost:8080/update/counter/metric/100" "POST" 200 "StatusOK"
-check_status "http://localhost:8080/update/counter//100" "POST" 404 "StatusNotFound (пустое имя)"
-check_status "http://localhost:8080/update/invalid/test/100" "POST" 400 "StatusBadRequest (неверный тип)"
-check_status "http://localhost:8080/update/gauge/test/abc" "POST" 400 "StatusBadRequest (неверное значение)"
 ```
