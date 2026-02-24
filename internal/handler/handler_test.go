@@ -13,12 +13,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func newTestHandler() *MetricHandler {
 	storage := repository.NewMemStorage()
 	svc := service.NewMetricService(storage)
-	return NewMetricHandler(svc)
+	return NewMetricHandler(svc, zap.NewNop())
 }
 
 func newTestServer(h *MetricHandler) *httptest.Server {

@@ -10,14 +10,16 @@ import (
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/service"
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 )
 
 type MetricHandler struct {
 	svc *service.MetricService
+	log *zap.Logger
 }
 
-func NewMetricHandler(svc *service.MetricService) *MetricHandler {
-	return &MetricHandler{svc: svc}
+func NewMetricHandler(svc *service.MetricService, log *zap.Logger) *MetricHandler {
+	return &MetricHandler{svc: svc, log: log}
 }
 
 func (h *MetricHandler) Routes() chi.Router {
@@ -36,6 +38,12 @@ func (h *MetricHandler) Routes() chi.Router {
 	r.Get("/value/{type}/{name}", h.GetValue)
 
 	return r
+}
+
+// internalError логирует 5xx ошибку и отвечает клиенту безопасным текстом.
+func (h *MetricHandler) internalError(w http.ResponseWriter, msg string, err error) {
+	h.log.Error(msg, zap.Error(err))
+	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 }
 
 // ─── text/plain эндпоинты ────────────────────────────────────────────────────
@@ -99,24 +107,22 @@ func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.svc.UpdateMetricFromModel(m); err != nil {
-		if err.Error() == "unknown metric type" {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Возвращаем актуальное состояние метрики (для counter — накопленное значение)
 	updated, err := h.svc.GetMetric(m.MType, m.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.internalError(w, "failed to get metric after update", err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(updated)
+	if err := json.NewEncoder(w).Encode(updated); err != nil {
+		h.log.Error("failed to encode response", zap.Error(err))
+	}
 }
 
 // GetValueJSON — POST /value — принимает {id, type}, возвращает метрику с заполненным значением.
@@ -145,7 +151,9 @@ func (h *MetricHandler) GetValueJSON(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(m)
+	if err := json.NewEncoder(w).Encode(m); err != nil {
+		h.log.Error("failed to encode response", zap.Error(err))
+	}
 }
 
 // ─── HTML dashboard ──────────────────────────────────────────────────────────
@@ -297,11 +305,13 @@ func (h *MetricHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
 
 	tmpl, err := template.New("metrics").Parse(htmlTemplate)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.internalError(w, "failed to parse template", err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	tmpl.Execute(w, data)
+	if err := tmpl.Execute(w, data); err != nil {
+		h.log.Error("failed to execute template", zap.Error(err))
+	}
 }

@@ -57,7 +57,7 @@ func main() {
 		})
 	}
 
-	h := handler.NewMetricHandler(svc)
+	h := handler.NewMetricHandler(svc, logger)
 
 	r := chi.NewRouter()
 	r.Use(custommiddleware.Logger(logger))
