@@ -1,22 +1,23 @@
-package main
+package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"strconv"
 )
 
-type Config struct {
+type ServerConfig struct {
 	Addr            string
 	StoreInterval   int
 	FileStoragePath string
 	Restore         bool
 }
 
-func parseConfig(args []string) Config {
+func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs := flag.NewFlagSet("server", flag.ExitOnError)
 
-	cfg := Config{}
+	cfg := ServerConfig{}
 	fs.StringVar(&cfg.Addr, "a", "localhost:8080", "HTTP server address")
 	fs.IntVar(&cfg.StoreInterval, "i", 300, "Store interval in seconds (0 = sync)")
 	fs.StringVar(&cfg.FileStoragePath, "f", "/tmp/metrics-db.json", "File storage path")
@@ -27,18 +28,22 @@ func parseConfig(args []string) Config {
 		cfg.Addr = env
 	}
 	if env, ok := os.LookupEnv("STORE_INTERVAL"); ok {
-		if v, err := strconv.Atoi(env); err == nil {
-			cfg.StoreInterval = v
+		v, err := strconv.Atoi(env)
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("invalid STORE_INTERVAL %q: %w", env, err)
 		}
+		cfg.StoreInterval = v
 	}
 	if env, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
 		cfg.FileStoragePath = env
 	}
 	if env, ok := os.LookupEnv("RESTORE"); ok {
-		if v, err := strconv.ParseBool(env); err == nil {
-			cfg.Restore = v
+		v, err := strconv.ParseBool(env)
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("invalid RESTORE %q: %w", env, err)
 		}
+		cfg.Restore = v
 	}
 
-	return cfg
+	return cfg, nil
 }

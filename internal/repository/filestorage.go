@@ -51,19 +51,7 @@ func (s *FileBackedStorage) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.mem.mu.RLock()
-	var metrics []model.Metrics
-	for name, val := range s.mem.gauges {
-		v := val
-		metrics = append(metrics, model.Metrics{ID: name, MType: model.Gauge, Value: &v})
-	}
-	for name, val := range s.mem.counters {
-		d := val
-		metrics = append(metrics, model.Metrics{ID: name, MType: model.Counter, Delta: &d})
-	}
-	s.mem.mu.RUnlock()
-
-	data, err := json.MarshalIndent(metrics, "", "  ")
+	data, err := json.MarshalIndent(s.mem.Snapshot(), "", "  ")
 	if err != nil {
 		return err
 	}

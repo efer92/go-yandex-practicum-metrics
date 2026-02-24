@@ -21,13 +21,11 @@ func tempFile(t *testing.T) string {
 func TestFileBackedStorage_SaveAndLoad(t *testing.T) {
 	path := tempFile(t)
 
-	// Сохраняем
 	s := NewFileBackedStorage(path)
 	s.UpdateGauge("Alloc", 1024.5)
 	s.UpdateCounter("PollCount", 7)
 	require.NoError(t, s.Save())
 
-	// Загружаем в новое хранилище
 	s2 := NewFileBackedStorage(path)
 	require.NoError(t, s2.Load())
 
@@ -42,7 +40,6 @@ func TestFileBackedStorage_SaveAndLoad(t *testing.T) {
 
 func TestFileBackedStorage_LoadNonExistent(t *testing.T) {
 	s := NewFileBackedStorage("/tmp/nonexistent-metrics-file.json")
-	// Должен вернуть nil (не ошибку)
 	assert.NoError(t, s.Load())
 }
 
@@ -56,7 +53,7 @@ func TestFileBackedStorage_LoadInvalidJSON(t *testing.T) {
 
 func TestFileBackedStorage_SaveCreatesFile(t *testing.T) {
 	path := tempFile(t)
-	os.Remove(path) // удаляем чтобы Save сам создал
+	os.Remove(path)
 
 	s := NewFileBackedStorage(path)
 	s.UpdateGauge("HeapAlloc", 512.0)
@@ -74,6 +71,7 @@ func TestFileBackedStorage_DelegatesStorage(t *testing.T) {
 
 	m, ok := s.GetMetric("Sys", model.Gauge)
 	assert.True(t, ok)
+	require.NotNil(t, m.Value)
 	assert.Equal(t, 99.9, *m.Value)
 
 	all := s.GetAllMetrics()

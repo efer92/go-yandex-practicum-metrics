@@ -1,10 +1,10 @@
 package agent
 
 import (
-	"log"
 	"time"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
+	"go.uber.org/zap"
 )
 
 type Agent struct {
@@ -12,6 +12,7 @@ type Agent struct {
 	sender         *Sender
 	pollInterval   time.Duration
 	reportInterval time.Duration
+	log            *zap.Logger
 }
 
 // New создает агента с дефолтными настройками
@@ -20,22 +21,24 @@ func New() *Agent {
 		"http://localhost:8080",
 		2*time.Second,
 		10*time.Second,
+		zap.NewNop(),
 	)
 }
 
 // NewWithConfig создает агента с кастомными настройками
-func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration) *Agent {
+func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration, logger *zap.Logger) *Agent {
 	return &Agent{
 		collector:      NewCollector(),
 		sender:         NewSender(serverURL),
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
+		log:            logger,
 	}
 }
 
 func (a *Agent) Run() {
 	a.collector.Collect()
-	log.Println("First metrics collected")
+	a.log.Info("first metrics collected")
 
 	pollTicker := time.NewTicker(a.pollInterval)
 	reportTicker := time.NewTicker(a.reportInterval)
@@ -46,13 +49,13 @@ func (a *Agent) Run() {
 		select {
 		case <-pollTicker.C:
 			a.collector.Collect()
-			log.Println("Metrics collected")
+			a.log.Info("metrics collected")
 
 		case <-reportTicker.C:
 			if err := a.report(); err != nil {
-				log.Printf("Failed to report: %v", err)
+				a.log.Error("failed to report", zap.Error(err))
 			} else {
-				log.Println("Metrics reported")
+				a.log.Info("metrics reported")
 			}
 		}
 	}
@@ -69,7 +72,7 @@ func convertToModelMetrics(snapshot Metrics) []model.Metrics {
 	result := make([]model.Metrics, 0, len(snapshot.Gauge)+1)
 
 	for name, val := range snapshot.Gauge {
-		v := val // копия для указателя
+		v := val
 		result = append(result, model.Metrics{
 			ID:    name,
 			MType: model.Gauge,
@@ -77,7 +80,6 @@ func convertToModelMetrics(snapshot Metrics) []model.Metrics {
 		})
 	}
 
-	// PollCount — counter
 	delta := snapshot.Counter
 	result = append(result, model.Metrics{
 		ID:    "PollCount",

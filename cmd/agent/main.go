@@ -6,20 +6,33 @@ import (
 	"time"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/agent"
+	"github.com/efer92/go-yandex-practicum-metrics/internal/config"
+	"go.uber.org/zap"
 )
 
 func main() {
-	cfg := parseConfig(os.Args[1:])
+	cfg, err := config.ParseAgentConfig(os.Args[1:])
+	if err != nil {
+		log.Fatalf("invalid config: %v", err)
+	}
 
-	serverURL := "http://" + cfg.Addr
+	logger, err := zap.NewProduction()
+	if err != nil {
+		log.Fatalf("failed to init logger: %v", err)
+	}
+	defer logger.Sync()
 
 	ag := agent.NewWithConfig(
-		serverURL,
+		"http://"+cfg.Addr,
 		time.Duration(cfg.PollInterval)*time.Second,
 		time.Duration(cfg.ReportInterval)*time.Second,
+		logger,
 	)
 
-	log.Printf("Agent started (server: %s, poll: %ds, report: %ds)",
-		cfg.Addr, cfg.PollInterval, cfg.ReportInterval)
+	logger.Info("agent started",
+		zap.String("server", cfg.Addr),
+		zap.Int("poll_interval", cfg.PollInterval),
+		zap.Int("report_interval", cfg.ReportInterval),
+	)
 	ag.Run()
 }

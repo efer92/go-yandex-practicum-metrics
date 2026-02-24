@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/efer92/go-yandex-practicum-metrics/internal/config"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/handler"
 	custommiddleware "github.com/efer92/go-yandex-practicum-metrics/internal/middleware"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/repository"
@@ -18,7 +19,10 @@ import (
 )
 
 func main() {
-	cfg := parseConfig(os.Args[1:])
+	cfg, err := config.ParseServerConfig(os.Args[1:])
+	if err != nil {
+		log.Fatalf("invalid config: %v", err)
+	}
 
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -26,13 +30,11 @@ func main() {
 	}
 	defer logger.Sync()
 
-	// Используем FileBackedStorage если задан путь к файлу
 	var storage repository.Storage
 	var fileSt *repository.FileBackedStorage
 
 	if cfg.FileStoragePath != "" {
 		fileSt = repository.NewFileBackedStorage(cfg.FileStoragePath)
-
 		if cfg.Restore {
 			if err := fileSt.Load(); err != nil {
 				logger.Warn("failed to load metrics from file", zap.Error(err))
@@ -47,7 +49,6 @@ func main() {
 
 	svc := service.NewMetricService(storage)
 
-	// Синхронная запись при каждом обновлении (StoreInterval == 0)
 	if fileSt != nil && cfg.StoreInterval == 0 {
 		svc.SetOnUpdate(func() {
 			if err := fileSt.Save(); err != nil {
@@ -64,7 +65,6 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Mount("/", h.Routes())
 
-	// Периодическое сохранение (StoreInterval > 0)
 	if fileSt != nil && cfg.StoreInterval > 0 {
 		go func() {
 			ticker := time.NewTicker(time.Duration(cfg.StoreInterval) * time.Second)
@@ -79,7 +79,6 @@ func main() {
 		}()
 	}
 
-	// Сохранение при завершении
 	if fileSt != nil {
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)

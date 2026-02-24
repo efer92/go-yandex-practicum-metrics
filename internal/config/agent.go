@@ -1,21 +1,22 @@
-package main
+package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"strconv"
 )
 
-type Config struct {
+type AgentConfig struct {
 	Addr           string
 	PollInterval   int
 	ReportInterval int
 }
 
-func parseConfig(args []string) Config {
+func ParseAgentConfig(args []string) (AgentConfig, error) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 
-	cfg := Config{}
+	cfg := AgentConfig{}
 	fs.StringVar(&cfg.Addr, "a", "localhost:8080", "HTTP server address")
 	fs.IntVar(&cfg.ReportInterval, "r", 10, "Report interval in seconds")
 	fs.IntVar(&cfg.PollInterval, "p", 2, "Poll interval in seconds")
@@ -25,15 +26,19 @@ func parseConfig(args []string) Config {
 		cfg.Addr = env
 	}
 	if env, ok := os.LookupEnv("REPORT_INTERVAL"); ok {
-		if v, err := strconv.Atoi(env); err == nil {
-			cfg.ReportInterval = v
+		v, err := strconv.Atoi(env)
+		if err != nil {
+			return AgentConfig{}, fmt.Errorf("invalid REPORT_INTERVAL %q: %w", env, err)
 		}
+		cfg.ReportInterval = v
 	}
 	if env, ok := os.LookupEnv("POLL_INTERVAL"); ok {
-		if v, err := strconv.Atoi(env); err == nil {
-			cfg.PollInterval = v
+		v, err := strconv.Atoi(env)
+		if err != nil {
+			return AgentConfig{}, fmt.Errorf("invalid POLL_INTERVAL %q: %w", env, err)
 		}
+		cfg.PollInterval = v
 	}
 
-	return cfg
+	return cfg, nil
 }
