@@ -1,7 +1,7 @@
 package service
 
 import (
-	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
@@ -35,7 +35,7 @@ func (s *MetricService) UpdateMetric(mType, name, value string) error {
 	case model.Gauge:
 		val, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return errors.New("invalid gauge value")
+			return fmt.Errorf("invalid gauge value: %w", err)
 		}
 		if err := s.storage.UpdateGauge(name, val); err != nil {
 			return err
@@ -43,13 +43,13 @@ func (s *MetricService) UpdateMetric(mType, name, value string) error {
 	case model.Counter:
 		val, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			return errors.New("invalid counter value")
+			return fmt.Errorf("invalid counter value: %w", err)
 		}
 		if err := s.storage.UpdateCounter(name, val); err != nil {
 			return err
 		}
 	default:
-		return errors.New("unknown metric type")
+		return ErrUnknownType
 	}
 	s.notifyUpdate()
 	return nil
@@ -60,20 +60,20 @@ func (s *MetricService) UpdateMetricFromModel(m model.Metrics) error {
 	switch m.MType {
 	case model.Gauge:
 		if m.Value == nil {
-			return errors.New("value is required for gauge")
+			return ErrValueRequired
 		}
 		if err := s.storage.UpdateGauge(m.ID, *m.Value); err != nil {
-			return err
+			return fmt.Errorf("failed to update gauge %q: %w", m.ID, err)
 		}
 	case model.Counter:
 		if m.Delta == nil {
-			return errors.New("delta is required for counter")
+			return ErrDeltaRequired
 		}
 		if err := s.storage.UpdateCounter(m.ID, *m.Delta); err != nil {
-			return err
+			return fmt.Errorf("failed to update counter %q: %w", m.ID, err)
 		}
 	default:
-		return errors.New("unknown metric type")
+		return ErrUnknownType
 	}
 	s.notifyUpdate()
 	return nil
@@ -82,14 +82,14 @@ func (s *MetricService) UpdateMetricFromModel(m model.Metrics) error {
 // GetMetric — возвращает метрику как model.Metrics для JSON эндпоинта
 func (s *MetricService) GetMetric(mType, name string) (*model.Metrics, error) {
 	if name == "" {
-		return nil, errors.New("metric name is empty")
+		return nil, ErrMetricNameEmpty
 	}
 	if mType != model.Gauge && mType != model.Counter {
-		return nil, errors.New("unknown metric type")
+		return nil, ErrUnknownType
 	}
 	m, ok := s.storage.GetMetric(name, mType)
 	if !ok {
-		return nil, errors.New("metric not found")
+		return nil, ErrMetricNotFound
 	}
 	return m, nil
 }
@@ -97,15 +97,15 @@ func (s *MetricService) GetMetric(mType, name string) (*model.Metrics, error) {
 // GetValue — старый метод для text/plain эндпоинта
 func (s *MetricService) GetValue(mType, name string) (string, error) {
 	if name == "" {
-		return "", errors.New("metric name is empty")
+		return "", ErrMetricNameEmpty
 	}
 	if mType != model.Gauge && mType != model.Counter {
-		return "", errors.New("unknown metric type")
+		return "", ErrUnknownType
 	}
 	if val, ok := s.storage.GetValue(mType, name); ok {
 		return val, nil
 	}
-	return "", errors.New("metric not found")
+	return "", ErrMetricNotFound
 }
 
 func (s *MetricService) GetAllMetrics() map[string]string {

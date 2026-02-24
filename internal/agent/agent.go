@@ -64,7 +64,7 @@ func (a *Agent) Run() {
 func (a *Agent) report() error {
 	snapshot := a.collector.GetSnapshot()
 	metrics := convertToModelMetrics(snapshot)
-	return a.sender.SendBatch(metrics)
+	return a.sender.SendMetrics(metrics)
 }
 
 // convertToModelMetrics конвертирует внутренний снапшот в []model.Metrics для отправки

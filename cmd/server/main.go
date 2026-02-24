@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -30,11 +32,14 @@ func main() {
 	}
 	defer logger.Sync()
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
 	var storage repository.Storage
 	var fileSt *repository.FileBackedStorage
 
 	if cfg.FileStoragePath != "" {
-		fileSt = repository.NewFileBackedStorage(cfg.FileStoragePath)
+		fileSt = repository.NewFileBackedStorage(cfg.FileStoragePath, logger)
 		if cfg.Restore {
 			if err := fileSt.Load(); err != nil {
 				logger.Warn("failed to load metrics from file", zap.Error(err))
@@ -49,12 +54,13 @@ func main() {
 
 	svc := service.NewMetricService(storage)
 
-	if fileSt != nil && cfg.StoreInterval == 0 {
-		svc.SetOnUpdate(func() {
-			if err := fileSt.Save(); err != nil {
-				logger.Error("sync save failed", zap.Error(err))
-			}
-		})
+	if fileSt != nil {
+		switch {
+		case cfg.StoreInterval == 0:
+			svc.SetOnUpdate(fileSt.SaveOnUpdate())
+		case cfg.StoreInterval > 0:
+			fileSt.StartPeriodicSave(ctx, time.Duration(cfg.StoreInterval)*time.Second)
+		}
 	}
 
 	h := handler.NewMetricHandler(svc, logger)
@@ -65,32 +71,7 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Mount("/", h.Routes())
 
-	if fileSt != nil && cfg.StoreInterval > 0 {
-		go func() {
-			ticker := time.NewTicker(time.Duration(cfg.StoreInterval) * time.Second)
-			defer ticker.Stop()
-			for range ticker.C {
-				if err := fileSt.Save(); err != nil {
-					logger.Error("periodic save failed", zap.Error(err))
-				} else {
-					logger.Info("metrics saved", zap.String("path", cfg.FileStoragePath))
-				}
-			}
-		}()
-	}
-
-	if fileSt != nil {
-		quit := make(chan os.Signal, 1)
-		signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
-		go func() {
-			<-quit
-			logger.Info("shutting down, saving metrics...")
-			if err := fileSt.Save(); err != nil {
-				logger.Error("final save failed", zap.Error(err))
-			}
-			os.Exit(0)
-		}()
-	}
+	srv := &http.Server{Addr: cfg.Addr, Handler: r}
 
 	logger.Info("server starting",
 		zap.String("addr", cfg.Addr),
@@ -99,7 +80,41 @@ func main() {
 		zap.Bool("restore", cfg.Restore),
 	)
 
-	if err := http.ListenAndServe(cfg.Addr, r); err != nil {
-		logger.Fatal("server error", zap.Error(err))
+	// Запускаем HTTP-сервер в горутине
+	serverErr := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			// ErrServerClosed — штатное завершение после Shutdown(), не ошибка
+			serverErr <- err
+		}
+		close(serverErr)
+	}()
+
+	// Ждём сигнала завершения или ошибки сервера
+	select {
+	case <-ctx.Done():
+		logger.Info("shutting down...")
+	case err := <-serverErr:
+		logger.Error("server error", zap.Error(err))
+		stop()
+	}
+
+	// Останавливаем HTTP-сервер — ждём завершения активных соединений
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("server shutdown error", zap.Error(err))
+	}
+
+	// Ждём завершения горутины сервера
+	for err := range serverErr {
+		logger.Error("server error after shutdown", zap.Error(err))
+	}
+
+	// Финальное сохранение — после остановки всех горутин
+	if fileSt != nil {
+		if err := fileSt.Close(); err != nil {
+			logger.Error("final save failed", zap.Error(err))
+		}
 	}
 }

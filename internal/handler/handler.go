@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"html/template"
 	"net/http"
 	"sort"
@@ -27,13 +28,11 @@ func (h *MetricHandler) Routes() chi.Router {
 
 	r.Get("/", h.ListMetrics)
 
-	// JSON эндпоинты — регистрируем до параметризованных
 	r.Post("/update", h.UpdateMetricJSON)
 	r.Post("/update/", h.UpdateMetricJSON)
 	r.Post("/value", h.GetValueJSON)
 	r.Post("/value/", h.GetValueJSON)
 
-	// text/plain эндпоинты (старые)
 	r.Post("/update/{type}/{name}/{value}", h.UpdateMetric)
 	r.Get("/value/{type}/{name}", h.GetValue)
 
@@ -44,6 +43,21 @@ func (h *MetricHandler) Routes() chi.Router {
 func (h *MetricHandler) internalError(w http.ResponseWriter, msg string, err error) {
 	h.log.Error(msg, zap.Error(err))
 	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+}
+
+// httpStatusForError возвращает HTTP-статус по типу ошибки сервиса.
+func httpStatusForError(err error) int {
+	switch {
+	case errors.Is(err, service.ErrMetricNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, service.ErrUnknownType),
+		errors.Is(err, service.ErrMetricNameEmpty),
+		errors.Is(err, service.ErrValueRequired),
+		errors.Is(err, service.ErrDeltaRequired):
+		return http.StatusBadRequest
+	default:
+		return http.StatusBadRequest
+	}
 }
 
 // ─── text/plain эндпоинты ────────────────────────────────────────────────────
@@ -59,7 +73,7 @@ func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.UpdateMetric(mType, name, value); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), httpStatusForError(err))
 		return
 	}
 
@@ -77,11 +91,7 @@ func (h *MetricHandler) GetValue(w http.ResponseWriter, r *http.Request) {
 
 	val, err := h.svc.GetValue(mType, name)
 	if err != nil {
-		if err.Error() == "metric not found" {
-			http.Error(w, err.Error(), http.StatusNotFound)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		http.Error(w, err.Error(), httpStatusForError(err))
 		return
 	}
 
@@ -92,7 +102,6 @@ func (h *MetricHandler) GetValue(w http.ResponseWriter, r *http.Request) {
 
 // ─── JSON эндпоинты ──────────────────────────────────────────────────────────
 
-// UpdateMetricJSON — POST /update — принимает метрику в JSON, сохраняет и возвращает её обратно.
 func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	var m model.Metrics
 
@@ -107,11 +116,10 @@ func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.svc.UpdateMetricFromModel(m); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), httpStatusForError(err))
 		return
 	}
 
-	// Возвращаем актуальное состояние метрики (для counter — накопленное значение)
 	updated, err := h.svc.GetMetric(m.MType, m.ID)
 	if err != nil {
 		h.internalError(w, "failed to get metric after update", err)
@@ -125,7 +133,6 @@ func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// GetValueJSON — POST /value — принимает {id, type}, возвращает метрику с заполненным значением.
 func (h *MetricHandler) GetValueJSON(w http.ResponseWriter, r *http.Request) {
 	var req model.Metrics
 
@@ -141,11 +148,7 @@ func (h *MetricHandler) GetValueJSON(w http.ResponseWriter, r *http.Request) {
 
 	m, err := h.svc.GetMetric(req.MType, req.ID)
 	if err != nil {
-		if err.Error() == "metric not found" {
-			http.Error(w, err.Error(), http.StatusNotFound)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		http.Error(w, err.Error(), httpStatusForError(err))
 		return
 	}
 

@@ -1,24 +1,29 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
+	"go.uber.org/zap"
 )
 
 // FileBackedStorage — обёртка над MemStorage с поддержкой сохранения на диск.
 type FileBackedStorage struct {
-	mem  *MemStorage
-	path string
-	mu   sync.Mutex
+	mem    *MemStorage
+	path   string
+	mu     sync.Mutex
+	logger *zap.Logger
 }
 
-func NewFileBackedStorage(path string) *FileBackedStorage {
+func NewFileBackedStorage(path string, logger *zap.Logger) *FileBackedStorage {
 	return &FileBackedStorage{
-		mem:  NewMemStorage(),
-		path: path,
+		mem:    NewMemStorage(),
+		path:   path,
+		logger: logger,
 	}
 }
 
@@ -66,7 +71,7 @@ func (s *FileBackedStorage) Load() error {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil // файла нет — это нормально при первом запуске
+			return nil
 		}
 		return err
 	}
@@ -89,4 +94,40 @@ func (s *FileBackedStorage) Load() error {
 		}
 	}
 	return nil
+}
+
+// StartPeriodicSave запускает фоновое периодическое сохранение с заданным интервалом.
+// Останавливается когда ctx отменён. Вызывать в отдельной горутине не нужно — сама запускает.
+func (s *FileBackedStorage) StartPeriodicSave(ctx context.Context, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := s.Save(); err != nil {
+					s.logger.Error("periodic save failed", zap.Error(err))
+				} else {
+					s.logger.Info("metrics saved", zap.String("path", s.path))
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// SaveOnUpdate возвращает колбэк для service.SetOnUpdate —
+// синхронно сохраняет при каждом изменении метрики (storeInterval == 0).
+func (s *FileBackedStorage) SaveOnUpdate() func() {
+	return func() {
+		if err := s.Save(); err != nil {
+			s.logger.Error("sync save failed", zap.Error(err))
+		}
+	}
+}
+
+// Close сохраняет метрики при завершении — вызывать при graceful shutdown.
+func (s *FileBackedStorage) Close() error {
+	return s.Save()
 }
