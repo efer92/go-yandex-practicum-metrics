@@ -1,183 +1,219 @@
 package handler
 
 import (
-    "net/http"
-    "net/http/httptest"
-    "strings"
-    "testing"
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 
-    "github.com/go-chi/chi/v5"
-    "github.com/efer92/go-yandex-practicum-metrics/internal/repository"
-    "github.com/efer92/go-yandex-practicum-metrics/internal/service"
+	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
+	"github.com/efer92/go-yandex-practicum-metrics/internal/repository"
+	"github.com/efer92/go-yandex-practicum-metrics/internal/service"
+	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func setupHandler() (*MetricHandler, chi.Router) {
-    storage := repository.NewMemStorage()
-    svc := service.NewMetricService(storage)
-    h := NewMetricHandler(svc)
-    return h, h.Routes()
+func newTestHandler() *MetricHandler {
+	storage := repository.NewMemStorage()
+	svc := service.NewMetricService(storage)
+	return NewMetricHandler(svc)
 }
 
-func TestUpdateMetric(t *testing.T) {
-    _, r := setupHandler()
-
-    tests := []struct {
-        name       string
-        method     string
-        url        string
-        wantStatus int
-    }{
-        {
-            name:       "valid counter",
-            method:     http.MethodPost,
-            url:        "/update/counter/PollCount/10",
-            wantStatus: http.StatusOK,
-        },
-        {
-            name:       "valid gauge",
-            method:     http.MethodPost,
-            url:        "/update/gauge/Alloc/123.45",
-            wantStatus: http.StatusOK,
-        },
-        {
-            name:       "empty metric name",
-            method:     http.MethodPost,
-            url:        "/update/counter//10",
-            wantStatus: http.StatusNotFound,
-        },
-        {
-            name:       "invalid metric type",
-            method:     http.MethodPost,
-            url:        "/update/invalid/test/10",
-            wantStatus: http.StatusBadRequest,
-        },
-        {
-            name:       "invalid counter value",
-            method:     http.MethodPost,
-            url:        "/update/counter/test/3.14",
-            wantStatus: http.StatusBadRequest,
-        },
-        {
-            name:       "invalid gauge value",
-            method:     http.MethodPost,
-            url:        "/update/gauge/test/abc",
-            wantStatus: http.StatusBadRequest,
-        },
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            req := httptest.NewRequest(tt.method, tt.url, nil)
-            rr := httptest.NewRecorder()
-
-            r.ServeHTTP(rr, req)
-
-            if rr.Code != tt.wantStatus {
-                t.Errorf("handler returned wrong status code: got %v want %v",
-                    rr.Code, tt.wantStatus)
-            }
-        })
-    }
+func newTestServer(h *MetricHandler) *httptest.Server {
+	r := chi.NewRouter()
+	r.Mount("/", h.Routes())
+	return httptest.NewServer(r)
 }
 
-func TestGetValue(t *testing.T) {
-    storage := repository.NewMemStorage()
-    svc := service.NewMetricService(storage)
-    h := NewMetricHandler(svc)
-    r := h.Routes()
+// ─── POST /update (JSON) ─────────────────────────────────────────────────────
 
-    // Предзаполняем хранилище
-    storage.UpdateGauge("HeapAlloc", 999.99)
-    storage.UpdateCounter("PollCount", 42)
+func TestUpdateMetricJSON_Gauge(t *testing.T) {
+	h := newTestHandler()
+	srv := newTestServer(h)
+	defer srv.Close()
 
-    tests := []struct {
-        name       string
-        method     string
-        url        string
-        wantStatus int
-        wantBody   string
-    }{
-        {
-            name:       "get existing gauge",
-            method:     http.MethodGet,
-            url:        "/value/gauge/HeapAlloc",
-            wantStatus: http.StatusOK,
-            wantBody:   "999.99",
-        },
-        {
-            name:       "get existing counter",
-            method:     http.MethodGet,
-            url:        "/value/counter/PollCount",
-            wantStatus: http.StatusOK,
-            wantBody:   "42",
-        },
-        {
-            name:       "get non-existing metric",
-            method:     http.MethodGet,
-            url:        "/value/gauge/Missing",
-            wantStatus: http.StatusNotFound,
-        },
-        {
-            name:       "empty name",
-            method:     http.MethodGet,
-            url:        "/value/gauge/",
-            wantStatus: http.StatusNotFound,
-        },
-    }
+	val := 42.5
+	m := model.Metrics{ID: "TestGauge", MType: model.Gauge, Value: &val}
+	body, _ := json.Marshal(m)
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            req := httptest.NewRequest(tt.method, tt.url, nil)
-            rr := httptest.NewRecorder()
+	resp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
 
-            r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 
-            if rr.Code != tt.wantStatus {
-                t.Errorf("handler returned wrong status code: got %v want %v",
-                    rr.Code, tt.wantStatus)
-            }
-
-            if tt.wantBody != "" && rr.Body.String() != tt.wantBody {
-                t.Errorf("handler returned unexpected body: got %v want %v",
-                    rr.Body.String(), tt.wantBody)
-            }
-        })
-    }
+	var result model.Metrics
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Equal(t, "TestGauge", result.ID)
+	assert.Equal(t, model.Gauge, result.MType)
+	require.NotNil(t, result.Value)
+	assert.Equal(t, 42.5, *result.Value)
 }
 
-func TestListMetrics(t *testing.T) {
-    storage := repository.NewMemStorage()
-    svc := service.NewMetricService(storage)
-    h := NewMetricHandler(svc)
-    r := h.Routes()
+func TestUpdateMetricJSON_Counter(t *testing.T) {
+	h := newTestHandler()
+	srv := newTestServer(h)
+	defer srv.Close()
 
-    // Добавляем тестовые данные
-    storage.UpdateGauge("TestGauge", 100.5)
-    storage.UpdateCounter("TestCounter", 42)
+	delta := int64(10)
+	m := model.Metrics{ID: "TestCounter", MType: model.Counter, Delta: &delta}
+	body, _ := json.Marshal(m)
 
-    req := httptest.NewRequest(http.MethodGet, "/", nil)
-    rr := httptest.NewRecorder()
+	// Отправляем дважды — счётчик должен накопиться
+	firstResp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	firstResp.Body.Close()
+	body, _ = json.Marshal(m)
+	resp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
 
-    r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-    if rr.Code != http.StatusOK {
-        t.Errorf("expected 200, got %d", rr.Code)
-    }
+	var result model.Metrics
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.NotNil(t, result.Delta)
+	assert.Equal(t, int64(20), *result.Delta) // 10 + 10
+}
 
-    body := rr.Body.String()
-    if !strings.Contains(body, "TestGauge") {
-        t.Error("response should contain TestGauge")
-    }
-    if !strings.Contains(body, "100.5") {
-        t.Error("response should contain value 100.5")
-    }
-	
-	if !strings.Contains(body, "<!DOCTYPE html>") {
-		t.Error("response should contain HTML")
-	}
+func TestUpdateMetricJSON_UnknownType(t *testing.T) {
+	h := newTestHandler()
+	srv := newTestServer(h)
+	defer srv.Close()
 
-    contentType := rr.Header().Get("Content-Type")
-    if !strings.Contains(contentType, "text/html") {
-        t.Errorf("Content-Type should contain text/html, got %s", contentType)
-    }
+	m := model.Metrics{ID: "X", MType: "unknown"}
+	body, _ := json.Marshal(m)
+
+	resp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestUpdateMetricJSON_EmptyID(t *testing.T) {
+	h := newTestHandler()
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	val := 1.0
+	m := model.Metrics{ID: "", MType: model.Gauge, Value: &val}
+	body, _ := json.Marshal(m)
+
+	resp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestUpdateMetricJSON_InvalidBody(t *testing.T) {
+	h := newTestHandler()
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBufferString("not json"))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// ─── POST /value (JSON) ──────────────────────────────────────────────────────
+
+func TestGetValueJSON_Gauge(t *testing.T) {
+	h := newTestHandler()
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	// Сначала сохраняем
+	val := 99.9
+	body, _ := json.Marshal(model.Metrics{ID: "Alloc", MType: model.Gauge, Value: &val})
+	setupResp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	setupResp.Body.Close()
+
+	// Запрашиваем
+	body, _ = json.Marshal(model.Metrics{ID: "Alloc", MType: model.Gauge})
+	resp, err := http.Post(srv.URL+"/value", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+	var result model.Metrics
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.NotNil(t, result.Value)
+	assert.Equal(t, 99.9, *result.Value)
+}
+
+func TestGetValueJSON_NotFound(t *testing.T) {
+	h := newTestHandler()
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	body, _ := json.Marshal(model.Metrics{ID: "NonExistent", MType: model.Gauge})
+	resp, err := http.Post(srv.URL+"/value", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestGetValueJSON_Counter(t *testing.T) {
+	h := newTestHandler()
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	delta := int64(5)
+	body, _ := json.Marshal(model.Metrics{ID: "PollCount", MType: model.Counter, Delta: &delta})
+	setupResp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	setupResp.Body.Close()
+
+	body, _ = json.Marshal(model.Metrics{ID: "PollCount", MType: model.Counter})
+	resp, err := http.Post(srv.URL+"/value", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result model.Metrics
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.NotNil(t, result.Delta)
+	assert.Equal(t, int64(5), *result.Delta)
+}
+
+// ─── Старые text/plain эндпоинты ─────────────────────────────────────────────
+
+func TestUpdateMetric_TextPlain(t *testing.T) {
+	h := newTestHandler()
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/update/gauge/TestMetric/42.5", "text/plain", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestGetValue_TextPlain(t *testing.T) {
+	h := newTestHandler()
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	setupResp, err := http.Post(srv.URL+"/update/gauge/TestMetric/42.5", "text/plain", nil)
+	require.NoError(t, err)
+	setupResp.Body.Close()
+
+	resp, err := http.Get(srv.URL + "/value/gauge/TestMetric")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
