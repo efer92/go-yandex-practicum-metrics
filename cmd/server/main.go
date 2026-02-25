@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 func main() {
@@ -32,8 +33,12 @@ func main() {
 	}
 	defer logger.Sync()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	// g.ctx отменяется когда любая горутина группы вернёт ошибку,
+	// или когда получен SIGTERM/SIGINT через signal.NotifyContext.
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+
+	g, ctx := errgroup.WithContext(sigCtx)
 
 	var storage repository.Storage
 	var fileSt *repository.FileBackedStorage
@@ -57,8 +62,9 @@ func main() {
 	if fileSt != nil {
 		switch {
 		case cfg.StoreInterval == 0:
-			svc.SetOnUpdate(fileSt.SaveOnUpdate())
+			svc.SetOnUpdate(fileSt.SaveOnUpdate)
 		case cfg.StoreInterval > 0:
+			// Периодическое сохранение завершится когда ctx отменится
 			fileSt.StartPeriodicSave(ctx, time.Duration(cfg.StoreInterval)*time.Second)
 		}
 	}
@@ -80,35 +86,29 @@ func main() {
 		zap.Bool("restore", cfg.Restore),
 	)
 
-	// Запускаем HTTP-сервер в горутине
-	serverErr := make(chan error, 1)
-	go func() {
+	// Горутина 1: HTTP-сервер.
+	// Возвращает ошибку только если ListenAndServe упал не по Shutdown.
+	g.Go(func() error {
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			// ErrServerClosed — штатное завершение после Shutdown(), не ошибка
-			serverErr <- err
+			return err
 		}
-		close(serverErr)
-	}()
+		return nil
+	})
 
-	// Ждём сигнала завершения или ошибки сервера
-	select {
-	case <-ctx.Done():
+	// Горутина 2: ждём отмены контекста (сигнал или ошибка сервера),
+	// затем штатно останавливаем HTTP-сервер.
+	g.Go(func() error {
+		<-ctx.Done()
 		logger.Info("shutting down...")
-	case err := <-serverErr:
-		logger.Error("server error", zap.Error(err))
-		stop()
-	}
 
-	// Останавливаем HTTP-сервер — ждём завершения активных соединений
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("server shutdown error", zap.Error(err))
-	}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	})
 
-	// Ждём завершения горутины сервера
-	for err := range serverErr {
-		logger.Error("server error after shutdown", zap.Error(err))
+	// Ждём завершения обеих горутин
+	if err := g.Wait(); err != nil {
+		logger.Error("server stopped with error", zap.Error(err))
 	}
 
 	// Финальное сохранение — после остановки всех горутин

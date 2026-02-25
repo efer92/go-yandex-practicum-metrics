@@ -97,7 +97,7 @@ func (s *FileBackedStorage) Load() error {
 }
 
 // StartPeriodicSave запускает фоновое периодическое сохранение с заданным интервалом.
-// Останавливается когда ctx отменён. Вызывать в отдельной горутине не нужно — сама запускает.
+// Останавливается когда ctx отменён.
 func (s *FileBackedStorage) StartPeriodicSave(ctx context.Context, interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -117,13 +117,11 @@ func (s *FileBackedStorage) StartPeriodicSave(ctx context.Context, interval time
 	}()
 }
 
-// SaveOnUpdate возвращает колбэк для service.SetOnUpdate —
-// синхронно сохраняет при каждом изменении метрики (storeInterval == 0).
-func (s *FileBackedStorage) SaveOnUpdate() func() {
-	return func() {
-		if err := s.Save(); err != nil {
-			s.logger.Error("sync save failed", zap.Error(err))
-		}
+// SaveOnUpdate — колбэк для service.SetOnUpdate.
+// Логирует ошибку вместо её возврата, т.к. колбэк не возвращает error.
+func (s *FileBackedStorage) SaveOnUpdate() {
+	if err := s.Save(); err != nil {
+		s.logger.Error("sync save failed", zap.Error(err))
 	}
 }
 
