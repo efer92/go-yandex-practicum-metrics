@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -85,12 +86,22 @@ func TestSender_SendGauge(t *testing.T) {
 		if r.Header.Get("Content-Type") != "application/json" {
 			t.Errorf("Expected Content-Type: application/json, got %s", r.Header.Get("Content-Type"))
 		}
+		if r.Header.Get("Content-Encoding") != "gzip" {
+			t.Errorf("Expected Content-Encoding: gzip, got %s", r.Header.Get("Content-Encoding"))
+		}
 		if r.URL.Path != "/update" {
 			t.Errorf("Expected path /update, got %s", r.URL.Path)
 		}
 
+		gr, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Errorf("Failed to create gzip reader: %v", err)
+			return
+		}
+		defer gr.Close()
+
 		var m model.Metrics
-		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		if err := json.NewDecoder(gr).Decode(&m); err != nil {
 			t.Errorf("Failed to decode body: %v", err)
 		}
 		if m.ID != "Alloc" || m.MType != model.Gauge || m.Value == nil || *m.Value != 123.456 {
@@ -111,8 +122,15 @@ func TestSender_SendGauge(t *testing.T) {
 
 func TestSender_SendCounter(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gr, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Errorf("Failed to create gzip reader: %v", err)
+			return
+		}
+		defer gr.Close()
+
 		var m model.Metrics
-		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		if err := json.NewDecoder(gr).Decode(&m); err != nil {
 			t.Errorf("Failed to decode body: %v", err)
 		}
 		if m.ID != "PollCount" || m.MType != model.Counter || m.Delta == nil || *m.Delta != 5 {
