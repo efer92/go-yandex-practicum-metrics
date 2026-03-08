@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"html/template"
 	"net/http"
 	"sort"
@@ -10,14 +11,16 @@ import (
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/service"
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 )
 
 type MetricHandler struct {
 	svc *service.MetricService
+	log *zap.Logger
 }
 
-func NewMetricHandler(svc *service.MetricService) *MetricHandler {
-	return &MetricHandler{svc: svc}
+func NewMetricHandler(svc *service.MetricService, log *zap.Logger) *MetricHandler {
+	return &MetricHandler{svc: svc, log: log}
 }
 
 func (h *MetricHandler) Routes() chi.Router {
@@ -25,17 +28,36 @@ func (h *MetricHandler) Routes() chi.Router {
 
 	r.Get("/", h.ListMetrics)
 
-	// JSON эндпоинты — регистрируем до параметризованных
 	r.Post("/update", h.UpdateMetricJSON)
 	r.Post("/update/", h.UpdateMetricJSON)
 	r.Post("/value", h.GetValueJSON)
 	r.Post("/value/", h.GetValueJSON)
 
-	// text/plain эндпоинты (старые)
 	r.Post("/update/{type}/{name}/{value}", h.UpdateMetric)
 	r.Get("/value/{type}/{name}", h.GetValue)
 
 	return r
+}
+
+// internalError логирует 5xx ошибку и отвечает клиенту безопасным текстом.
+func (h *MetricHandler) internalError(w http.ResponseWriter, msg string, err error) {
+	h.log.Error(msg, zap.Error(err))
+	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+}
+
+// httpStatusForError возвращает HTTP-статус по типу ошибки сервиса.
+func httpStatusForError(err error) int {
+	switch {
+	case errors.Is(err, service.ErrMetricNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, service.ErrUnknownType),
+		errors.Is(err, service.ErrMetricNameEmpty),
+		errors.Is(err, service.ErrValueRequired),
+		errors.Is(err, service.ErrDeltaRequired):
+		return http.StatusBadRequest
+	default:
+		return http.StatusBadRequest
+	}
 }
 
 // ─── text/plain эндпоинты ────────────────────────────────────────────────────
@@ -51,7 +73,7 @@ func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.UpdateMetric(mType, name, value); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), httpStatusForError(err))
 		return
 	}
 
@@ -69,11 +91,7 @@ func (h *MetricHandler) GetValue(w http.ResponseWriter, r *http.Request) {
 
 	val, err := h.svc.GetValue(mType, name)
 	if err != nil {
-		if err.Error() == "metric not found" {
-			http.Error(w, err.Error(), http.StatusNotFound)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		http.Error(w, err.Error(), httpStatusForError(err))
 		return
 	}
 
@@ -84,7 +102,6 @@ func (h *MetricHandler) GetValue(w http.ResponseWriter, r *http.Request) {
 
 // ─── JSON эндпоинты ──────────────────────────────────────────────────────────
 
-// UpdateMetricJSON — POST /update — принимает метрику в JSON, сохраняет и возвращает её обратно.
 func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	var m model.Metrics
 
@@ -99,27 +116,23 @@ func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.svc.UpdateMetricFromModel(m); err != nil {
-		if err.Error() == "unknown metric type" {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		http.Error(w, err.Error(), httpStatusForError(err))
 		return
 	}
 
-	// Возвращаем актуальное состояние метрики (для counter — накопленное значение)
 	updated, err := h.svc.GetMetric(m.MType, m.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.internalError(w, "failed to get metric after update", err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(updated)
+	if err := json.NewEncoder(w).Encode(updated); err != nil {
+		h.log.Error("failed to encode response", zap.Error(err))
+	}
 }
 
-// GetValueJSON — POST /value — принимает {id, type}, возвращает метрику с заполненным значением.
 func (h *MetricHandler) GetValueJSON(w http.ResponseWriter, r *http.Request) {
 	var req model.Metrics
 
@@ -135,17 +148,15 @@ func (h *MetricHandler) GetValueJSON(w http.ResponseWriter, r *http.Request) {
 
 	m, err := h.svc.GetMetric(req.MType, req.ID)
 	if err != nil {
-		if err.Error() == "metric not found" {
-			http.Error(w, err.Error(), http.StatusNotFound)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		http.Error(w, err.Error(), httpStatusForError(err))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(m)
+	if err := json.NewEncoder(w).Encode(m); err != nil {
+		h.log.Error("failed to encode response", zap.Error(err))
+	}
 }
 
 // ─── HTML dashboard ──────────────────────────────────────────────────────────
@@ -297,11 +308,13 @@ func (h *MetricHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
 
 	tmpl, err := template.New("metrics").Parse(htmlTemplate)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.internalError(w, "failed to parse template", err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	tmpl.Execute(w, data)
+	if err := tmpl.Execute(w, data); err != nil {
+		h.log.Error("failed to execute template", zap.Error(err))
+	}
 }

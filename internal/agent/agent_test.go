@@ -162,7 +162,7 @@ func TestSender_ServerError(t *testing.T) {
 	}
 }
 
-func TestSender_SendBatch(t *testing.T) {
+func TestSender_SendMetrics(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
@@ -178,7 +178,7 @@ func TestSender_SendBatch(t *testing.T) {
 	}
 	metrics := convertToModelMetrics(snapshot)
 
-	err := sender.SendBatch(metrics)
+	err := sender.SendMetrics(metrics)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestSender_SendBatch(t *testing.T) {
 	}
 }
 
-func TestSender_SendBatch_Error(t *testing.T) {
+func TestSender_SendMetrics_Error(t *testing.T) {
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
@@ -209,7 +209,7 @@ func TestSender_SendBatch_Error(t *testing.T) {
 	}
 	metrics := convertToModelMetrics(snapshot)
 
-	err := sender.SendBatch(metrics)
+	err := sender.SendMetrics(metrics)
 	if err == nil {
 		t.Error("Expected error when server fails")
 	}

@@ -1,13 +1,12 @@
 package agent
 
 import (
-	"bytes"
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
+	"github.com/efer92/go-yandex-practicum-metrics/pkg/compress"
 )
 
 type Sender struct {
@@ -22,7 +21,7 @@ func NewSender(serverURL string) *Sender {
 	}
 }
 
-func (s *Sender) SendBatch(metrics []model.Metrics) error {
+func (s *Sender) SendMetrics(metrics []model.Metrics) error {
 	for _, m := range metrics {
 		if err := s.send(m); err != nil {
 			return err
@@ -37,20 +36,12 @@ func (s *Sender) send(m model.Metrics) error {
 		return fmt.Errorf("marshal metric: %w", err)
 	}
 
-	// Сжимаем тело запроса
-	var buf bytes.Buffer
-	gz, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+	buf, err := compress.GzipData(body)
 	if err != nil {
-		return fmt.Errorf("create gzip writer: %w", err)
-	}
-	if _, err = gz.Write(body); err != nil {
-		return fmt.Errorf("gzip write: %w", err)
-	}
-	if err = gz.Close(); err != nil {
-		return fmt.Errorf("gzip close: %w", err)
+		return fmt.Errorf("compress metric %s: %w", m.ID, err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, s.serverURL+"/update", &buf)
+	req, err := http.NewRequest(http.MethodPost, s.serverURL+"/update", buf)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
