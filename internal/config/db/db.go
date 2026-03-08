@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/efer92/go-yandex-practicum-metrics/internal/migrations"
+	"github.com/efer92/go-yandex-practicum-metrics/migrations"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
