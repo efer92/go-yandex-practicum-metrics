@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/efer92/go-yandex-practicum-metrics/internal/migrations"
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -44,4 +48,28 @@ func Connect(ctx context.Context, cfg Config) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+// Migrate применяет все pending миграции из migrations/.
+func Migrate(db *sql.DB) error {
+	src, err := iofs.New(migrations.FS, "migrations")
+	if err != nil {
+		return fmt.Errorf("migrations source: %w", err)
+	}
+
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		return fmt.Errorf("migrations driver: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", src, "postgres", driver)
+	if err != nil {
+		return fmt.Errorf("migrate init: %w", err)
+	}
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("migrate up: %w", err)
+	}
+
+	return nil
 }
