@@ -2,11 +2,14 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/compress"
+	"github.com/efer92/go-yandex-practicum-metrics/pkg/retry"
 )
 
 type Sender struct {
@@ -21,13 +24,24 @@ func NewSender(serverURL string) *Sender {
 	}
 }
 
-func (s *Sender) SendMetrics(metrics []model.Metrics) error {
-	for _, m := range metrics {
-		if err := s.send(m); err != nil {
-			return err
-		}
+// isRetriableHTTPError возвращает true для временных сетевых ошибок соединения.
+func isRetriableHTTPError(err error) bool {
+	var netErr *url.Error
+	if errors.As(err, &netErr) {
+		return netErr.Timeout() || netErr.Temporary()
 	}
-	return nil
+	return false
+}
+
+func (s *Sender) SendMetrics(metrics []model.Metrics) error {
+	return retry.Do(func() error {
+		for _, m := range metrics {
+			if err := s.send(m); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, isRetriableHTTPError)
 }
 
 func (s *Sender) send(m model.Metrics) error {
@@ -67,6 +81,12 @@ func (s *Sender) SendBatch(metrics []model.Metrics) error {
 		return nil
 	}
 
+	return retry.Do(func() error {
+		return s.sendBatch(metrics)
+	}, isRetriableHTTPError)
+}
+
+func (s *Sender) sendBatch(metrics []model.Metrics) error {
 	body, err := json.Marshal(metrics)
 	if err != nil {
 		return fmt.Errorf("marshal metrics: %w", err)
