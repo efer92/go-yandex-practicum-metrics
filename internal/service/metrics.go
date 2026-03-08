@@ -111,3 +111,14 @@ func (s *MetricService) GetValue(mType, name string) (string, error) {
 func (s *MetricService) GetAllMetrics() map[string]string {
 	return s.storage.GetAllMetrics()
 }
+
+func (s *MetricService) UpdateBatch(metrics []model.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+	if err := s.storage.UpdateBatch(metrics); err != nil {
+		return fmt.Errorf("batch update failed: %w", err)
+	}
+	s.notifyUpdate()
+	return nil
+}

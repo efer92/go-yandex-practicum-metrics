@@ -61,3 +61,39 @@ func (s *Sender) send(m model.Metrics) error {
 
 	return nil
 }
+
+func (s *Sender) SendBatch(metrics []model.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	body, err := json.Marshal(metrics)
+	if err != nil {
+		return fmt.Errorf("marshal metrics: %w", err)
+	}
+
+	buf, err := compress.GzipData(body)
+	if err != nil {
+		return fmt.Errorf("compress metrics: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, s.serverURL+"/updates/", buf)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send batch: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status for batch: %d", resp.StatusCode)
+	}
+
+	return nil
+}

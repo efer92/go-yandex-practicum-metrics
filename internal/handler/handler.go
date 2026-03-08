@@ -41,7 +41,9 @@ func (h *MetricHandler) Routes() chi.Router {
 	r.Post("/value", h.GetValueJSON)
 	r.Post("/value/", h.GetValueJSON)
 
+	r.Post("/updates/", h.UpdateMetricsBatch)
 	r.Post("/update/{type}/{name}/{value}", h.UpdateMetric)
+
 	r.Get("/value/{type}/{name}", h.GetValue)
 
 	return r
@@ -51,6 +53,27 @@ func (h *MetricHandler) Routes() chi.Router {
 func (h *MetricHandler) internalError(w http.ResponseWriter, msg string, err error) {
 	h.log.Error(msg, zap.Error(err))
 	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+}
+
+func (h *MetricHandler) UpdateMetricsBatch(w http.ResponseWriter, r *http.Request) {
+	var metrics []model.Metrics
+
+	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(metrics) == 0 {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if err := h.svc.UpdateBatch(metrics); err != nil {
+		h.internalError(w, "batch update failed", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 // httpStatusForError возвращает HTTP-статус по типу ошибки сервиса.
