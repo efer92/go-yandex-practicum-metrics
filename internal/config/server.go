@@ -12,6 +12,7 @@ type ServerConfig struct {
 	StoreInterval   int
 	FileStoragePath string
 	Restore         bool
+	DatabaseDSN     string
 }
 
 func ParseServerConfig(args []string) (ServerConfig, error) {
@@ -22,6 +23,7 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs.IntVar(&cfg.StoreInterval, "i", 300, "Store interval in seconds (0 = sync)")
 	fs.StringVar(&cfg.FileStoragePath, "f", "/tmp/metrics-db.json", "File storage path")
 	fs.BoolVar(&cfg.Restore, "r", true, "Restore metrics from file on start")
+	fs.StringVar(&cfg.DatabaseDSN, "d", "", "PostgreSQL DSN")
 	fs.Parse(args)
 
 	if env, ok := os.LookupEnv("ADDRESS"); ok {
@@ -43,6 +45,9 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 			return ServerConfig{}, fmt.Errorf("invalid RESTORE %q: %w", env, err)
 		}
 		cfg.Restore = v
+	}
+	if env, ok := os.LookupEnv("DATABASE_DSN"); ok {
+		cfg.DatabaseDSN = env
 	}
 
 	return cfg, nil
