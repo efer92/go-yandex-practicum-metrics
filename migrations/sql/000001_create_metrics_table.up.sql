@@ -3,5 +3,6 @@ CREATE TABLE IF NOT EXISTS metrics (
     mtype TEXT             NOT NULL,
     delta BIGINT,
     value DOUBLE PRECISION,
+    updated_at TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id, mtype)
 );

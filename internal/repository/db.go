@@ -3,10 +3,14 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/config/db"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
+	"github.com/efer92/go-yandex-practicum-metrics/pkg/retry"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgerrcode"
 )
 
 type DBStorage struct {
@@ -18,12 +22,21 @@ func NewDBStorage(ctx context.Context, dsn string) (*DBStorage, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &DBStorage{db: conn}
-	if err := s.migrate(ctx); err != nil {
+
+	if err := db.Migrate(conn); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	return s, nil
+
+	return &DBStorage{db: conn}, nil
+}
+
+func isRetriablePgError(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgerrcode.IsConnectionException(pgErr.Code)
+	}
+	return false
 }
 
 func (s *DBStorage) Ping(ctx context.Context) error {
@@ -34,97 +47,101 @@ func (s *DBStorage) Close() error {
 	return s.db.Close()
 }
 
-func (s *DBStorage) migrate(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS metrics (
-			id    TEXT             NOT NULL,
-			mtype TEXT             NOT NULL,
-			delta BIGINT,
-			value DOUBLE PRECISION,
-			PRIMARY KEY (id, mtype)
-		)
-	`)
-	return err
+func (s *DBStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
+	return retry.Do(func() error {
+		_, err := s.db.ExecContext(ctx, `
+			INSERT INTO metrics (id, mtype, value)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (id, mtype) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+		`, name, model.Gauge, value)
+		return err
+	}, isRetriablePgError)
 }
 
-// --- реализация интерфейса Storage ---
-
-func (s *DBStorage) UpdateGauge(name string, value float64) error {
-	_, err := s.db.ExecContext(context.Background(), `
-		INSERT INTO metrics (id, mtype, value)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (id, mtype) DO UPDATE SET value = EXCLUDED.value
-	`, name, model.Gauge, value)
-	return err
+func (s *DBStorage) UpdateCounter(ctx context.Context, name string, value int64) error {
+	return retry.Do(func() error {
+		_, err := s.db.ExecContext(ctx, `
+			INSERT INTO metrics (id, mtype, delta)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (id, mtype) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta, updated_at = NOW()
+		`, name, model.Counter, value)
+		return err
+	}, isRetriablePgError)
 }
 
-func (s *DBStorage) UpdateCounter(name string, value int64) error {
-	_, err := s.db.ExecContext(context.Background(), `
-		INSERT INTO metrics (id, mtype, delta)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (id, mtype) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
-	`, name, model.Counter, value)
-	return err
-}
-
-func (s *DBStorage) UpdateBatch(metrics []model.Metrics) error {
-	tx, err := s.db.BeginTx(context.Background(), nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	for _, m := range metrics {
-		switch m.MType {
-		case model.Gauge:
-			if m.Value == nil {
-				continue
-			}
-			_, err = tx.ExecContext(context.Background(), `
-				INSERT INTO metrics (id, mtype, value)
-				VALUES ($1, $2, $3)
-				ON CONFLICT (id, mtype) DO UPDATE SET value = EXCLUDED.value
-			`, m.ID, model.Gauge, *m.Value)
-		case model.Counter:
-			if m.Delta == nil {
-				continue
-			}
-			_, err = tx.ExecContext(context.Background(), `
-				INSERT INTO metrics (id, mtype, delta)
-				VALUES ($1, $2, $3)
-				ON CONFLICT (id, mtype) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
-			`, m.ID, model.Counter, *m.Delta)
-		}
+func (s *DBStorage) UpdateBatch(ctx context.Context, metrics []model.Metrics) error {
+	return retry.Do(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
-			return fmt.Errorf("exec metric %s: %w", m.ID, err)
+			return fmt.Errorf("begin tx: %w", err)
 		}
-	}
+		defer tx.Rollback()
 
-	return tx.Commit()
+		for _, m := range metrics {
+			switch m.MType {
+			case model.Gauge:
+				if m.Value == nil {
+					continue
+				}
+				_, err = tx.ExecContext(ctx, `
+					INSERT INTO metrics (id, mtype, value)
+					VALUES ($1, $2, $3)
+					ON CONFLICT (id, mtype) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+				`, m.ID, model.Gauge, *m.Value)
+			case model.Counter:
+				if m.Delta == nil {
+					continue
+				}
+				_, err = tx.ExecContext(ctx, `
+					INSERT INTO metrics (id, mtype, delta)
+					VALUES ($1, $2, $3)
+					ON CONFLICT (id, mtype) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta, updated_at = NOW()
+				`, m.ID, model.Counter, *m.Delta)
+			}
+			if err != nil {
+				return fmt.Errorf("exec metric %s: %w", m.ID, err)
+			}
+		}
+
+		return tx.Commit()
+	}, isRetriablePgError)
 }
 
-func (s *DBStorage) GetMetric(name string, mType string) (*model.Metrics, bool) {
-	row := s.db.QueryRowContext(context.Background(), `
-		SELECT id, mtype, delta, value FROM metrics WHERE id = $1 AND mtype = $2
-	`, name, mType)
+func (s *DBStorage) GetMetric(ctx context.Context, name string, mType string) (*model.Metrics, bool) {
+	var result *model.Metrics
 
-	m := &model.Metrics{}
-	var delta sql.NullInt64
-	var value sql.NullFloat64
-	if err := row.Scan(&m.ID, &m.MType, &delta, &value); err != nil {
+	err := retry.Do(func() error {
+		row := s.db.QueryRowContext(ctx, `
+			SELECT id, mtype, delta, value FROM metrics WHERE id = $1 AND mtype = $2
+		`, name, mType)
+
+		m := &model.Metrics{}
+		var delta sql.NullInt64
+		var value sql.NullFloat64
+		if err := row.Scan(&m.ID, &m.MType, &delta, &value); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+		if delta.Valid {
+			m.Delta = &delta.Int64
+		}
+		if value.Valid {
+			m.Value = &value.Float64
+		}
+		result = m
+		return nil
+	}, isRetriablePgError)
+
+	if err != nil || result == nil {
 		return nil, false
 	}
-	if delta.Valid {
-		m.Delta = &delta.Int64
-	}
-	if value.Valid {
-		m.Value = &value.Float64
-	}
-	return m, true
+	return result, true
 }
 
-func (s *DBStorage) GetValue(mType string, name string) (string, bool) {
-	m, ok := s.GetMetric(name, mType)
+func (s *DBStorage) GetValue(ctx context.Context, mType string, name string) (string, bool) {
+	m, ok := s.GetMetric(ctx, name, mType)
 	if !ok {
 		return "", false
 	}
@@ -141,36 +158,39 @@ func (s *DBStorage) GetValue(mType string, name string) (string, bool) {
 	return "", false
 }
 
-func (s *DBStorage) GetAllMetrics() map[string]string {
-	rows, err := s.db.QueryContext(context.Background(), `
-		SELECT id, mtype, delta, value FROM metrics
-	`)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
+func (s *DBStorage) GetAllMetrics(ctx context.Context) map[string]string {
+	var result map[string]string
 
-	result := make(map[string]string)
-	for rows.Next() {
-		var id, mtype string
-		var delta sql.NullInt64
-		var value sql.NullFloat64
-		if err := rows.Scan(&id, &mtype, &delta, &value); err != nil {
-			continue
+	retry.Do(func() error {
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT id, mtype, delta, value FROM metrics
+		`)
+		if err != nil {
+			return err
 		}
-		switch mtype {
-		case model.Gauge:
-			if value.Valid {
-				result["gauge/"+id] = fmt.Sprintf("%g", value.Float64)
+		defer rows.Close()
+
+		result = make(map[string]string)
+		for rows.Next() {
+			var id, mtype string
+			var delta sql.NullInt64
+			var value sql.NullFloat64
+			if err := rows.Scan(&id, &mtype, &delta, &value); err != nil {
+				continue
 			}
-		case model.Counter:
-			if delta.Valid {
-				result["counter/"+id] = fmt.Sprintf("%d", delta.Int64)
+			switch mtype {
+			case model.Gauge:
+				if value.Valid {
+					result["gauge/"+id] = fmt.Sprintf("%g", value.Float64)
+				}
+			case model.Counter:
+				if delta.Valid {
+					result["counter/"+id] = fmt.Sprintf("%d", delta.Int64)
+				}
 			}
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil
-	}
+		return rows.Err()
+	}, isRetriablePgError)
+
 	return result
 }

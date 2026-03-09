@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"strconv"
 	"sync"
 
@@ -8,12 +9,12 @@ import (
 )
 
 type Storage interface {
-	UpdateGauge(name string, value float64) error
-	UpdateCounter(name string, value int64) error
-	UpdateBatch(metrics []model.Metrics) error
-	GetMetric(name string, mType string) (*model.Metrics, bool)
-	GetValue(mType string, name string) (string, bool)
-	GetAllMetrics() map[string]string
+	UpdateGauge(ctx context.Context, name string, value float64) error
+	UpdateCounter(ctx context.Context, name string, value int64) error
+	UpdateBatch(ctx context.Context, metrics []model.Metrics) error
+	GetMetric(ctx context.Context, name string, mType string) (*model.Metrics, bool)
+	GetValue(ctx context.Context, mType string, name string) (string, bool)
+	GetAllMetrics(ctx context.Context) map[string]string
 }
 
 type MemStorage struct {
@@ -29,22 +30,21 @@ func NewMemStorage() *MemStorage {
 	}
 }
 
-func (s *MemStorage) UpdateGauge(name string, value float64) error {
+func (s *MemStorage) UpdateGauge(_ context.Context, name string, value float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gauges[name] = value
 	return nil
 }
 
-func (s *MemStorage) UpdateCounter(name string, value int64) error {
+func (s *MemStorage) UpdateCounter(_ context.Context, name string, value int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.counters[name] += value
 	return nil
 }
 
-// UpdateBatch атомарно обновляет все метрики под одним локом — нет race condition.
-func (s *MemStorage) UpdateBatch(metrics []model.Metrics) error {
+func (s *MemStorage) UpdateBatch(_ context.Context, metrics []model.Metrics) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -63,7 +63,7 @@ func (s *MemStorage) UpdateBatch(metrics []model.Metrics) error {
 	return nil
 }
 
-func (s *MemStorage) GetMetric(name string, mType string) (*model.Metrics, bool) {
+func (s *MemStorage) GetMetric(_ context.Context, name string, mType string) (*model.Metrics, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -80,7 +80,7 @@ func (s *MemStorage) GetMetric(name string, mType string) (*model.Metrics, bool)
 	return nil, false
 }
 
-func (s *MemStorage) GetValue(mType string, name string) (string, bool) {
+func (s *MemStorage) GetValue(_ context.Context, mType string, name string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -97,7 +97,7 @@ func (s *MemStorage) GetValue(mType string, name string) (string, bool) {
 	return "", false
 }
 
-func (s *MemStorage) GetAllMetrics() map[string]string {
+func (s *MemStorage) GetAllMetrics(_ context.Context) map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

@@ -21,6 +21,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pinger) http.Handler {
+	h := handler.NewMetricHandler(svc, logger, pinger)
+
+	r := chi.NewRouter()
+	r.Use(custommiddleware.Logger(logger))
+	r.Use(custommiddleware.GzipMiddleware)
+	r.Use(middleware.Recoverer)
+	r.Mount("/", h.Routes())
+
+	return r
+}
+
 func main() {
 	cfg, err := config.ParseServerConfig(os.Args[1:])
 	if err != nil {
@@ -45,7 +57,6 @@ func main() {
 	if cfg.DatabaseDSN != "" {
 		dbSt, err = repository.NewDBStorage(ctx, cfg.DatabaseDSN)
 		if err != nil {
-			// БД недоступна — логируем и падаем в MemStorage
 			logger.Warn("failed to connect to db, falling back to memory storage", zap.Error(err))
 		} else {
 			defer dbSt.Close()
@@ -80,21 +91,18 @@ func main() {
 		}
 	}
 
-	// pinger — nil если БД не используется или недоступна, /ping вернёт 500
 	var pinger handler.Pinger
 	if dbSt != nil {
 		pinger = dbSt
 	}
 
-	h := handler.NewMetricHandler(svc, logger, pinger)
-
-	r := chi.NewRouter()
-	r.Use(custommiddleware.Logger(logger))
-	r.Use(custommiddleware.GzipMiddleware)
-	r.Use(middleware.Recoverer)
-	r.Mount("/", h.Routes())
-
-	srv := &http.Server{Addr: cfg.Addr, Handler: r}
+	srv := &http.Server{
+		Addr:         cfg.Addr,
+		Handler:      newRouter(svc, logger, pinger),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
 
 	logger.Info("server starting",
 		zap.String("addr", cfg.Addr),

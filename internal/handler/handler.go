@@ -23,7 +23,7 @@ type Pinger interface {
 type MetricHandler struct {
 	svc    *service.MetricService
 	log    *zap.Logger
-	pinger Pinger // nil если БД не используется
+	pinger Pinger
 }
 
 func NewMetricHandler(svc *service.MetricService, log *zap.Logger, pinger Pinger) *MetricHandler {
@@ -40,10 +40,9 @@ func (h *MetricHandler) Routes() chi.Router {
 	r.Post("/update/", h.UpdateMetricJSON)
 	r.Post("/value", h.GetValueJSON)
 	r.Post("/value/", h.GetValueJSON)
-
 	r.Post("/updates/", h.UpdateMetricsBatch)
-	r.Post("/update/{type}/{name}/{value}", h.UpdateMetric)
 
+	r.Post("/update/{type}/{name}/{value}", h.UpdateMetric)
 	r.Get("/value/{type}/{name}", h.GetValue)
 
 	return r
@@ -53,27 +52,6 @@ func (h *MetricHandler) Routes() chi.Router {
 func (h *MetricHandler) internalError(w http.ResponseWriter, msg string, err error) {
 	h.log.Error(msg, zap.Error(err))
 	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-}
-
-func (h *MetricHandler) UpdateMetricsBatch(w http.ResponseWriter, r *http.Request) {
-	var metrics []model.Metrics
-
-	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
-		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if len(metrics) == 0 {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	if err := h.svc.UpdateBatch(metrics); err != nil {
-		h.internalError(w, "batch update failed", err)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
 }
 
 // httpStatusForError возвращает HTTP-статус по типу ошибки сервиса.
@@ -116,7 +94,7 @@ func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.UpdateMetric(mType, name, value); err != nil {
+	if err := h.svc.UpdateMetric(r.Context(), mType, name, value); err != nil {
 		http.Error(w, err.Error(), httpStatusForError(err))
 		return
 	}
@@ -133,7 +111,7 @@ func (h *MetricHandler) GetValue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	val, err := h.svc.GetValue(mType, name)
+	val, err := h.svc.GetValue(r.Context(), mType, name)
 	if err != nil {
 		http.Error(w, err.Error(), httpStatusForError(err))
 		return
@@ -159,12 +137,12 @@ func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.svc.UpdateMetricFromModel(m); err != nil {
+	if err := h.svc.UpdateMetricFromModel(r.Context(), m); err != nil {
 		http.Error(w, err.Error(), httpStatusForError(err))
 		return
 	}
 
-	updated, err := h.svc.GetMetric(m.MType, m.ID)
+	updated, err := h.svc.GetMetric(r.Context(), m.MType, m.ID)
 	if err != nil {
 		h.internalError(w, "failed to get metric after update", err)
 		return
@@ -190,7 +168,7 @@ func (h *MetricHandler) GetValueJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m, err := h.svc.GetMetric(req.MType, req.ID)
+	m, err := h.svc.GetMetric(r.Context(), req.MType, req.ID)
 	if err != nil {
 		http.Error(w, err.Error(), httpStatusForError(err))
 		return
@@ -201,6 +179,27 @@ func (h *MetricHandler) GetValueJSON(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(m); err != nil {
 		h.log.Error("failed to encode response", zap.Error(err))
 	}
+}
+
+func (h *MetricHandler) UpdateMetricsBatch(w http.ResponseWriter, r *http.Request) {
+	var metrics []model.Metrics
+
+	if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(metrics) == 0 {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if err := h.svc.UpdateBatch(r.Context(), metrics); err != nil {
+		h.internalError(w, "batch update failed", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 // ─── HTML dashboard ──────────────────────────────────────────────────────────
@@ -329,7 +328,7 @@ const htmlTemplate = `
 `
 
 func (h *MetricHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
-	metrics := h.svc.GetAllMetrics()
+	metrics := h.svc.GetAllMetrics(r.Context())
 
 	var data []MetricView
 	for key, val := range metrics {

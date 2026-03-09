@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/efer92/go-yandex-practicum-metrics/internal/migrations"
+	"github.com/efer92/go-yandex-practicum-metrics/migrations"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
@@ -50,9 +50,9 @@ func Connect(ctx context.Context, cfg Config) (*sql.DB, error) {
 	return db, nil
 }
 
-// Migrate применяет все pending миграции из migrations/.
+// Migrate применяет все pending миграции из sql/.
 func Migrate(db *sql.DB) error {
-	src, err := iofs.New(migrations.FS, "migrations")
+	src, err := iofs.New(migrations.FS, "sql")
 	if err != nil {
 		return fmt.Errorf("migrations source: %w", err)
 	}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -17,8 +18,6 @@ func NewMetricService(storage repository.Storage) *MetricService {
 	return &MetricService{storage: storage}
 }
 
-// SetOnUpdate регистрирует колбэк, вызываемый после каждого обновления метрики.
-// Используется для синхронной записи на диск при StoreInterval == 0.
 func (s *MetricService) SetOnUpdate(fn func()) {
 	s.onUpdate = fn
 }
@@ -29,15 +28,14 @@ func (s *MetricService) notifyUpdate() {
 	}
 }
 
-// UpdateMetric — старый метод для text/plain эндпоинта
-func (s *MetricService) UpdateMetric(mType, name, value string) error {
+func (s *MetricService) UpdateMetric(ctx context.Context, mType, name, value string) error {
 	switch mType {
 	case model.Gauge:
 		val, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return fmt.Errorf("invalid gauge value: %w", err)
 		}
-		if err := s.storage.UpdateGauge(name, val); err != nil {
+		if err := s.storage.UpdateGauge(ctx, name, val); err != nil {
 			return err
 		}
 	case model.Counter:
@@ -45,7 +43,7 @@ func (s *MetricService) UpdateMetric(mType, name, value string) error {
 		if err != nil {
 			return fmt.Errorf("invalid counter value: %w", err)
 		}
-		if err := s.storage.UpdateCounter(name, val); err != nil {
+		if err := s.storage.UpdateCounter(ctx, name, val); err != nil {
 			return err
 		}
 	default:
@@ -55,21 +53,20 @@ func (s *MetricService) UpdateMetric(mType, name, value string) error {
 	return nil
 }
 
-// UpdateMetricFromModel — новый метод для JSON эндпоинта
-func (s *MetricService) UpdateMetricFromModel(m model.Metrics) error {
+func (s *MetricService) UpdateMetricFromModel(ctx context.Context, m model.Metrics) error {
 	switch m.MType {
 	case model.Gauge:
 		if m.Value == nil {
 			return ErrValueRequired
 		}
-		if err := s.storage.UpdateGauge(m.ID, *m.Value); err != nil {
+		if err := s.storage.UpdateGauge(ctx, m.ID, *m.Value); err != nil {
 			return fmt.Errorf("failed to update gauge %q: %w", m.ID, err)
 		}
 	case model.Counter:
 		if m.Delta == nil {
 			return ErrDeltaRequired
 		}
-		if err := s.storage.UpdateCounter(m.ID, *m.Delta); err != nil {
+		if err := s.storage.UpdateCounter(ctx, m.ID, *m.Delta); err != nil {
 			return fmt.Errorf("failed to update counter %q: %w", m.ID, err)
 		}
 	default:
@@ -79,46 +76,44 @@ func (s *MetricService) UpdateMetricFromModel(m model.Metrics) error {
 	return nil
 }
 
-// GetMetric — возвращает метрику как model.Metrics для JSON эндпоинта
-func (s *MetricService) GetMetric(mType, name string) (*model.Metrics, error) {
+func (s *MetricService) UpdateBatch(ctx context.Context, metrics []model.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+	if err := s.storage.UpdateBatch(ctx, metrics); err != nil {
+		return fmt.Errorf("batch update failed: %w", err)
+	}
+	s.notifyUpdate()
+	return nil
+}
+
+func (s *MetricService) GetMetric(ctx context.Context, mType, name string) (*model.Metrics, error) {
 	if name == "" {
 		return nil, ErrMetricNameEmpty
 	}
 	if mType != model.Gauge && mType != model.Counter {
 		return nil, ErrUnknownType
 	}
-	m, ok := s.storage.GetMetric(name, mType)
+	m, ok := s.storage.GetMetric(ctx, name, mType)
 	if !ok {
 		return nil, ErrMetricNotFound
 	}
 	return m, nil
 }
 
-// GetValue — старый метод для text/plain эндпоинта
-func (s *MetricService) GetValue(mType, name string) (string, error) {
+func (s *MetricService) GetValue(ctx context.Context, mType, name string) (string, error) {
 	if name == "" {
 		return "", ErrMetricNameEmpty
 	}
 	if mType != model.Gauge && mType != model.Counter {
 		return "", ErrUnknownType
 	}
-	if val, ok := s.storage.GetValue(mType, name); ok {
+	if val, ok := s.storage.GetValue(ctx, mType, name); ok {
 		return val, nil
 	}
 	return "", ErrMetricNotFound
 }
 
-func (s *MetricService) GetAllMetrics() map[string]string {
-	return s.storage.GetAllMetrics()
-}
-
-func (s *MetricService) UpdateBatch(metrics []model.Metrics) error {
-	if len(metrics) == 0 {
-		return nil
-	}
-	if err := s.storage.UpdateBatch(metrics); err != nil {
-		return fmt.Errorf("batch update failed: %w", err)
-	}
-	s.notifyUpdate()
-	return nil
+func (s *MetricService) GetAllMetrics(ctx context.Context) map[string]string {
+	return s.storage.GetAllMetrics(ctx)
 }
