@@ -129,3 +129,7 @@ func (s *FileBackedStorage) SaveOnUpdate() {
 func (s *FileBackedStorage) Close() error {
 	return s.Save()
 }
+
+func (s *FileBackedStorage) UpdateBatch(metrics []model.Metrics) error {
+	return s.mem.UpdateBatch(metrics)
+}

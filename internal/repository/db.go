@@ -67,6 +67,42 @@ func (s *DBStorage) UpdateCounter(name string, value int64) error {
 	return err
 }
 
+func (s *DBStorage) UpdateBatch(metrics []model.Metrics) error {
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, m := range metrics {
+		switch m.MType {
+		case model.Gauge:
+			if m.Value == nil {
+				continue
+			}
+			_, err = tx.ExecContext(context.Background(), `
+				INSERT INTO metrics (id, mtype, value)
+				VALUES ($1, $2, $3)
+				ON CONFLICT (id, mtype) DO UPDATE SET value = EXCLUDED.value
+			`, m.ID, model.Gauge, *m.Value)
+		case model.Counter:
+			if m.Delta == nil {
+				continue
+			}
+			_, err = tx.ExecContext(context.Background(), `
+				INSERT INTO metrics (id, mtype, delta)
+				VALUES ($1, $2, $3)
+				ON CONFLICT (id, mtype) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
+			`, m.ID, model.Counter, *m.Delta)
+		}
+		if err != nil {
+			return fmt.Errorf("exec metric %s: %w", m.ID, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (s *DBStorage) GetMetric(name string, mType string) (*model.Metrics, bool) {
 	row := s.db.QueryRowContext(context.Background(), `
 		SELECT id, mtype, delta, value FROM metrics WHERE id = $1 AND mtype = $2

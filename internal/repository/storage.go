@@ -10,9 +10,10 @@ import (
 type Storage interface {
 	UpdateGauge(name string, value float64) error
 	UpdateCounter(name string, value int64) error
+	UpdateBatch(metrics []model.Metrics) error
 	GetMetric(name string, mType string) (*model.Metrics, bool)
 	GetValue(mType string, name string) (string, bool)
-	GetAllMetrics() map[string]string // ключ: "type/name", значение: string(value)
+	GetAllMetrics() map[string]string
 }
 
 type MemStorage struct {
@@ -39,6 +40,26 @@ func (s *MemStorage) UpdateCounter(name string, value int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.counters[name] += value
+	return nil
+}
+
+// UpdateBatch атомарно обновляет все метрики под одним локом — нет race condition.
+func (s *MemStorage) UpdateBatch(metrics []model.Metrics) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, m := range metrics {
+		switch m.MType {
+		case model.Gauge:
+			if m.Value != nil {
+				s.gauges[m.ID] = *m.Value
+			}
+		case model.Counter:
+			if m.Delta != nil {
+				s.counters[m.ID] += *m.Delta
+			}
+		}
+	}
 	return nil
 }
 
@@ -90,7 +111,6 @@ func (s *MemStorage) GetAllMetrics() map[string]string {
 	return result
 }
 
-// Snapshot возвращает копию всех метрик — каждый объект управляет только своим мьютексом.
 func (s *MemStorage) Snapshot() []model.Metrics {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
