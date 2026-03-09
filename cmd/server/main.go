@@ -33,8 +33,6 @@ func main() {
 	}
 	defer logger.Sync()
 
-	// g.ctx отменяется когда любая горутина группы вернёт ошибку,
-	// или когда получен SIGTERM/SIGINT через signal.NotifyContext.
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
@@ -42,8 +40,20 @@ func main() {
 
 	var storage repository.Storage
 	var fileSt *repository.FileBackedStorage
+	var dbSt *repository.DBStorage
 
-	if cfg.FileStoragePath != "" {
+	if cfg.DatabaseDSN != "" {
+		dbSt, err = repository.NewDBStorage(ctx, cfg.DatabaseDSN)
+		if err != nil {
+			// БД недоступна — логируем и падаем в MemStorage
+			logger.Warn("failed to connect to db, falling back to memory storage", zap.Error(err))
+		} else {
+			defer dbSt.Close()
+			storage = dbSt
+		}
+	}
+
+	if storage == nil && cfg.FileStoragePath != "" {
 		fileSt = repository.NewFileBackedStorage(cfg.FileStoragePath, logger)
 		if cfg.Restore {
 			if err := fileSt.Load(); err != nil {
@@ -53,7 +63,9 @@ func main() {
 			}
 		}
 		storage = fileSt
-	} else {
+	}
+
+	if storage == nil {
 		storage = repository.NewMemStorage()
 	}
 
@@ -64,12 +76,17 @@ func main() {
 		case cfg.StoreInterval == 0:
 			svc.SetOnUpdate(fileSt.SaveOnUpdate)
 		case cfg.StoreInterval > 0:
-			// Периодическое сохранение завершится когда ctx отменится
 			fileSt.StartPeriodicSave(ctx, time.Duration(cfg.StoreInterval)*time.Second)
 		}
 	}
 
-	h := handler.NewMetricHandler(svc, logger)
+	// pinger — nil если БД не используется или недоступна, /ping вернёт 500
+	var pinger handler.Pinger
+	if dbSt != nil {
+		pinger = dbSt
+	}
+
+	h := handler.NewMetricHandler(svc, logger, pinger)
 
 	r := chi.NewRouter()
 	r.Use(custommiddleware.Logger(logger))
@@ -81,13 +98,12 @@ func main() {
 
 	logger.Info("server starting",
 		zap.String("addr", cfg.Addr),
+		zap.String("database_dsn", cfg.DatabaseDSN),
 		zap.Int("store_interval", cfg.StoreInterval),
 		zap.String("file_storage_path", cfg.FileStoragePath),
 		zap.Bool("restore", cfg.Restore),
 	)
 
-	// Горутина 1: HTTP-сервер.
-	// Возвращает ошибку только если ListenAndServe упал не по Shutdown.
 	g.Go(func() error {
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			return err
@@ -95,8 +111,6 @@ func main() {
 		return nil
 	})
 
-	// Горутина 2: ждём отмены контекста (сигнал или ошибка сервера),
-	// затем штатно останавливаем HTTP-сервер.
 	g.Go(func() error {
 		<-ctx.Done()
 		logger.Info("shutting down...")
@@ -106,12 +120,10 @@ func main() {
 		return srv.Shutdown(shutdownCtx)
 	})
 
-	// Ждём завершения обеих горутин
 	if err := g.Wait(); err != nil {
 		logger.Error("server stopped with error", zap.Error(err))
 	}
 
-	// Финальное сохранение — после остановки всех горутин
 	if fileSt != nil {
 		if err := fileSt.Close(); err != nil {
 			logger.Error("final save failed", zap.Error(err))

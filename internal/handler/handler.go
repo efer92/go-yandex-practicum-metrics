@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -14,19 +15,26 @@ import (
 	"go.uber.org/zap"
 )
 
-type MetricHandler struct {
-	svc *service.MetricService
-	log *zap.Logger
+// Pinger — опциональная проверка соединения с БД.
+type Pinger interface {
+	Ping(ctx context.Context) error
 }
 
-func NewMetricHandler(svc *service.MetricService, log *zap.Logger) *MetricHandler {
-	return &MetricHandler{svc: svc, log: log}
+type MetricHandler struct {
+	svc    *service.MetricService
+	log    *zap.Logger
+	pinger Pinger // nil если БД не используется
+}
+
+func NewMetricHandler(svc *service.MetricService, log *zap.Logger, pinger Pinger) *MetricHandler {
+	return &MetricHandler{svc: svc, log: log, pinger: pinger}
 }
 
 func (h *MetricHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
 	r.Get("/", h.ListMetrics)
+	r.Get("/ping", h.Ping)
 
 	r.Post("/update", h.UpdateMetricJSON)
 	r.Post("/update/", h.UpdateMetricJSON)
@@ -58,6 +66,19 @@ func httpStatusForError(err error) int {
 	default:
 		return http.StatusBadRequest
 	}
+}
+
+// Ping — GET /ping — проверяет соединение с БД.
+func (h *MetricHandler) Ping(w http.ResponseWriter, r *http.Request) {
+	if h.pinger == nil {
+		http.Error(w, "database not configured", http.StatusInternalServerError)
+		return
+	}
+	if err := h.pinger.Ping(r.Context()); err != nil {
+		h.internalError(w, "db ping failed", err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // ─── text/plain эндпоинты ────────────────────────────────────────────────────

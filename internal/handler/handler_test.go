@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,13 +20,65 @@ import (
 func newTestHandler() *MetricHandler {
 	storage := repository.NewMemStorage()
 	svc := service.NewMetricService(storage)
-	return NewMetricHandler(svc, zap.NewNop())
+	return NewMetricHandler(svc, zap.NewNop(), nil)
 }
 
 func newTestServer(h *MetricHandler) *httptest.Server {
 	r := chi.NewRouter()
 	r.Mount("/", h.Routes())
 	return httptest.NewServer(r)
+}
+
+// ─── mock Pinger ─────────────────────────────────────────────────────────────
+
+type mockPinger struct {
+	err error
+}
+
+func (m *mockPinger) Ping(_ context.Context) error {
+	return m.err
+}
+
+// ─── GET /ping ────────────────────────────────────────────────────────────────
+
+func TestPing_NoPinger(t *testing.T) {
+	h := newTestHandler() // pinger == nil
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ping")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
+func TestPing_Success(t *testing.T) {
+	storage := repository.NewMemStorage()
+	svc := service.NewMetricService(storage)
+	h := NewMetricHandler(svc, zap.NewNop(), &mockPinger{err: nil})
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ping")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestPing_Failure(t *testing.T) {
+	storage := repository.NewMemStorage()
+	svc := service.NewMetricService(storage)
+	h := NewMetricHandler(svc, zap.NewNop(), &mockPinger{err: assert.AnError})
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ping")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
 // ─── POST /update (JSON) ─────────────────────────────────────────────────────
@@ -63,7 +116,6 @@ func TestUpdateMetricJSON_Counter(t *testing.T) {
 	m := model.Metrics{ID: "TestCounter", MType: model.Counter, Delta: &delta}
 	body, _ := json.Marshal(m)
 
-	// Отправляем дважды — счётчик должен накопиться
 	firstResp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
 	require.NoError(t, err)
 	firstResp.Body.Close()
@@ -77,7 +129,7 @@ func TestUpdateMetricJSON_Counter(t *testing.T) {
 	var result model.Metrics
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 	require.NotNil(t, result.Delta)
-	assert.Equal(t, int64(20), *result.Delta) // 10 + 10
+	assert.Equal(t, int64(20), *result.Delta)
 }
 
 func TestUpdateMetricJSON_UnknownType(t *testing.T) {
@@ -130,14 +182,12 @@ func TestGetValueJSON_Gauge(t *testing.T) {
 	srv := newTestServer(h)
 	defer srv.Close()
 
-	// Сначала сохраняем
 	val := 99.9
 	body, _ := json.Marshal(model.Metrics{ID: "Alloc", MType: model.Gauge, Value: &val})
 	setupResp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
 	require.NoError(t, err)
 	setupResp.Body.Close()
 
-	// Запрашиваем
 	body, _ = json.Marshal(model.Metrics{ID: "Alloc", MType: model.Gauge})
 	resp, err := http.Post(srv.URL+"/value", "application/json", bytes.NewBuffer(body))
 	require.NoError(t, err)
