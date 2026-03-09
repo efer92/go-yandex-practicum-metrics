@@ -29,24 +29,28 @@ func NewFileBackedStorage(path string, logger *zap.Logger) *FileBackedStorage {
 
 // --- реализация интерфейса Storage (делегируем в MemStorage) ---
 
-func (s *FileBackedStorage) UpdateGauge(name string, value float64) error {
-	return s.mem.UpdateGauge(name, value)
+func (s *FileBackedStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
+	return s.mem.UpdateGauge(ctx, name, value)
 }
 
-func (s *FileBackedStorage) UpdateCounter(name string, value int64) error {
-	return s.mem.UpdateCounter(name, value)
+func (s *FileBackedStorage) UpdateCounter(ctx context.Context, name string, value int64) error {
+	return s.mem.UpdateCounter(ctx, name, value)
 }
 
-func (s *FileBackedStorage) GetMetric(name string, mType string) (*model.Metrics, bool) {
-	return s.mem.GetMetric(name, mType)
+func (s *FileBackedStorage) UpdateBatch(ctx context.Context, metrics []model.Metrics) error {
+	return s.mem.UpdateBatch(ctx, metrics)
 }
 
-func (s *FileBackedStorage) GetValue(mType string, name string) (string, bool) {
-	return s.mem.GetValue(mType, name)
+func (s *FileBackedStorage) GetMetric(ctx context.Context, name string, mType string) (*model.Metrics, bool) {
+	return s.mem.GetMetric(ctx, name, mType)
 }
 
-func (s *FileBackedStorage) GetAllMetrics() map[string]string {
-	return s.mem.GetAllMetrics()
+func (s *FileBackedStorage) GetValue(ctx context.Context, mType string, name string) (string, bool) {
+	return s.mem.GetValue(ctx, mType, name)
+}
+
+func (s *FileBackedStorage) GetAllMetrics(ctx context.Context) map[string]string {
+	return s.mem.GetAllMetrics(ctx)
 }
 
 // --- файловые операции ---
@@ -81,15 +85,16 @@ func (s *FileBackedStorage) Load() error {
 		return err
 	}
 
+	ctx := context.Background()
 	for _, m := range metrics {
 		switch m.MType {
 		case model.Gauge:
 			if m.Value != nil {
-				s.mem.UpdateGauge(m.ID, *m.Value)
+				s.mem.UpdateGauge(ctx, m.ID, *m.Value)
 			}
 		case model.Counter:
 			if m.Delta != nil {
-				s.mem.UpdateCounter(m.ID, *m.Delta)
+				s.mem.UpdateCounter(ctx, m.ID, *m.Delta)
 			}
 		}
 	}
@@ -128,8 +133,4 @@ func (s *FileBackedStorage) SaveOnUpdate() {
 // Close сохраняет метрики при завершении — вызывать при graceful shutdown.
 func (s *FileBackedStorage) Close() error {
 	return s.Save()
-}
-
-func (s *FileBackedStorage) UpdateBatch(metrics []model.Metrics) error {
-	return s.mem.UpdateBatch(metrics)
 }

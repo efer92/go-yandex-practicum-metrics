@@ -2,28 +2,29 @@ package retry
 
 import (
 	"time"
+
+	retrygo "github.com/avast/retry-go/v4"
 )
 
-var intervals = []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+var delays = []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
 
 // Do выполняет fn до 4 раз (1 основная + 3 повтора).
 // Повторяет если isRetriable(err) == true.
 func Do(fn func() error, isRetriable func(error) bool) error {
-	err := fn()
-	if err == nil {
-		return nil
-	}
+	return DoWithDelays(fn, isRetriable, delays)
+}
 
-	for _, interval := range intervals {
-		if !isRetriable(err) {
-			return err
-		}
-		time.Sleep(interval)
-		err = fn()
-		if err == nil {
-			return nil
-		}
-	}
-
-	return err
+func DoWithDelays(fn func() error, isRetriable func(error) bool, ivs []time.Duration) error {
+	return retrygo.Do(
+		fn,
+		retrygo.Attempts(uint(len(ivs)+1)),
+		retrygo.RetryIf(isRetriable),
+		retrygo.LastErrorOnly(true),
+		retrygo.DelayType(func(n uint, _ error, _ *retrygo.Config) time.Duration {
+			if int(n) < len(ivs) {
+				return ivs[n]
+			}
+			return ivs[len(ivs)-1]
+		}),
+	)
 }

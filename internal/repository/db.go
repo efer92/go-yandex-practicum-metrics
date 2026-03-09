@@ -31,7 +31,6 @@ func NewDBStorage(ctx context.Context, dsn string) (*DBStorage, error) {
 	return &DBStorage{db: conn}, nil
 }
 
-// isRetriablePgError возвращает true для ошибок класса 08 (Connection Exception).
 func isRetriablePgError(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
@@ -48,33 +47,31 @@ func (s *DBStorage) Close() error {
 	return s.db.Close()
 }
 
-// --- реализация интерфейса Storage ---
-
-func (s *DBStorage) UpdateGauge(name string, value float64) error {
+func (s *DBStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
 	return retry.Do(func() error {
-		_, err := s.db.ExecContext(context.Background(), `
+		_, err := s.db.ExecContext(ctx, `
 			INSERT INTO metrics (id, mtype, value)
 			VALUES ($1, $2, $3)
-			ON CONFLICT (id, mtype) DO UPDATE SET value = EXCLUDED.value
+			ON CONFLICT (id, mtype) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
 		`, name, model.Gauge, value)
 		return err
 	}, isRetriablePgError)
 }
 
-func (s *DBStorage) UpdateCounter(name string, value int64) error {
+func (s *DBStorage) UpdateCounter(ctx context.Context, name string, value int64) error {
 	return retry.Do(func() error {
-		_, err := s.db.ExecContext(context.Background(), `
+		_, err := s.db.ExecContext(ctx, `
 			INSERT INTO metrics (id, mtype, delta)
 			VALUES ($1, $2, $3)
-			ON CONFLICT (id, mtype) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
+			ON CONFLICT (id, mtype) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta, updated_at = NOW()
 		`, name, model.Counter, value)
 		return err
 	}, isRetriablePgError)
 }
 
-func (s *DBStorage) UpdateBatch(metrics []model.Metrics) error {
+func (s *DBStorage) UpdateBatch(ctx context.Context, metrics []model.Metrics) error {
 	return retry.Do(func() error {
-		tx, err := s.db.BeginTx(context.Background(), nil)
+		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin tx: %w", err)
 		}
@@ -86,19 +83,19 @@ func (s *DBStorage) UpdateBatch(metrics []model.Metrics) error {
 				if m.Value == nil {
 					continue
 				}
-				_, err = tx.ExecContext(context.Background(), `
+				_, err = tx.ExecContext(ctx, `
 					INSERT INTO metrics (id, mtype, value)
 					VALUES ($1, $2, $3)
-					ON CONFLICT (id, mtype) DO UPDATE SET value = EXCLUDED.value
+					ON CONFLICT (id, mtype) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
 				`, m.ID, model.Gauge, *m.Value)
 			case model.Counter:
 				if m.Delta == nil {
 					continue
 				}
-				_, err = tx.ExecContext(context.Background(), `
+				_, err = tx.ExecContext(ctx, `
 					INSERT INTO metrics (id, mtype, delta)
 					VALUES ($1, $2, $3)
-					ON CONFLICT (id, mtype) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta
+					ON CONFLICT (id, mtype) DO UPDATE SET delta = metrics.delta + EXCLUDED.delta, updated_at = NOW()
 				`, m.ID, model.Counter, *m.Delta)
 			}
 			if err != nil {
@@ -110,11 +107,11 @@ func (s *DBStorage) UpdateBatch(metrics []model.Metrics) error {
 	}, isRetriablePgError)
 }
 
-func (s *DBStorage) GetMetric(name string, mType string) (*model.Metrics, bool) {
+func (s *DBStorage) GetMetric(ctx context.Context, name string, mType string) (*model.Metrics, bool) {
 	var result *model.Metrics
 
 	err := retry.Do(func() error {
-		row := s.db.QueryRowContext(context.Background(), `
+		row := s.db.QueryRowContext(ctx, `
 			SELECT id, mtype, delta, value FROM metrics WHERE id = $1 AND mtype = $2
 		`, name, mType)
 
@@ -123,7 +120,7 @@ func (s *DBStorage) GetMetric(name string, mType string) (*model.Metrics, bool) 
 		var value sql.NullFloat64
 		if err := row.Scan(&m.ID, &m.MType, &delta, &value); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return nil // не retriable — просто не найдено
+				return nil
 			}
 			return err
 		}
@@ -143,8 +140,8 @@ func (s *DBStorage) GetMetric(name string, mType string) (*model.Metrics, bool) 
 	return result, true
 }
 
-func (s *DBStorage) GetValue(mType string, name string) (string, bool) {
-	m, ok := s.GetMetric(name, mType)
+func (s *DBStorage) GetValue(ctx context.Context, mType string, name string) (string, bool) {
+	m, ok := s.GetMetric(ctx, name, mType)
 	if !ok {
 		return "", false
 	}
@@ -161,11 +158,11 @@ func (s *DBStorage) GetValue(mType string, name string) (string, bool) {
 	return "", false
 }
 
-func (s *DBStorage) GetAllMetrics() map[string]string {
+func (s *DBStorage) GetAllMetrics(ctx context.Context) map[string]string {
 	var result map[string]string
 
 	retry.Do(func() error {
-		rows, err := s.db.QueryContext(context.Background(), `
+		rows, err := s.db.QueryContext(ctx, `
 			SELECT id, mtype, delta, value FROM metrics
 		`)
 		if err != nil {
