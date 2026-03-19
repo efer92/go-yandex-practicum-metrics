@@ -430,7 +430,6 @@ git clone https://github.com/efer92/go-yandex-practicum-metrics
 Установите зависимости:
 
 ```bash
-go mod init github.com/efer92/go-yandex-practicum-metrics
 go mod tidy
 ```
 
@@ -443,13 +442,63 @@ go run ./cmd/server -a localhost:9090
 Запустите агент:
 
 ```bash
-go run ./cmd/agent -a localhost:9090 -r 15 -p 10
+go run ./cmd/agent -a localhost:9090 -l 5 -r 15 -p 10
 ```
 
 Откройте в браузере графический интерфейс:
 
-```bash
+```
 http://localhost:9090/ (8080 по-умолчанию)
+```
+
+---
+
+## Флаги и переменные окружения
+
+### Сервер
+
+| Флаг | Переменная окружения | По умолчанию | Описание |
+|------|----------------------|--------------|----------|
+| `-a` | `ADDRESS` | `localhost:8080` | Адрес HTTP-сервера |
+| `-i` | `STORE_INTERVAL` | `300` | Интервал сохранения метрик на диск (сек). `0` — синхронная запись при каждом обновлении |
+| `-f` | `FILE_STORAGE_PATH` | `/tmp/metrics-db.json` | Путь к файлу хранилища |
+| `-r` | `RESTORE` | `true` | Восстанавливать метрики из файла при старте |
+| `-d` | `DATABASE_DSN` | — | PostgreSQL DSN (если задан, файловое хранилище игнорируется) |
+| `-k` | `KEY` | — | Ключ для подписи данных по алгоритму HMAC-SHA256 |
+
+### Агент
+
+| Флаг | Переменная окружения | По умолчанию | Описание |
+|------|----------------------|--------------|----------|
+| `-a` | `ADDRESS` | `localhost:8080` | Адрес сервера |
+| `-p` | `POLL_INTERVAL` | `2` | Интервал сбора метрик (сек) |
+| `-r` | `REPORT_INTERVAL` | `10` | Интервал отправки метрик на сервер (сек) |
+| `-l` | `RATE_LIMIT` | `1` | Максимальное число одновременных исходящих запросов |
+| `-k` | `KEY` | — | Ключ для подписи данных по алгоритму HMAC-SHA256 |
+
+Переменные окружения имеют приоритет над флагами.
+
+---
+
+## Примеры запуска
+
+Запуск с PostgreSQL и подписью:
+
+```bash
+go run ./cmd/server -a localhost:9090 -d "postgres://postgres:postgres@localhost:5432/metrics?sslmode=disable" -k mysecret
+go run ./cmd/agent -a localhost:9090 -k mysecret -l 3
+```
+
+Запуск с файловым хранилищем и синхронной записью:
+
+```bash
+go run ./cmd/server -a localhost:9090 -f /tmp/metrics.json -i 0
+```
+
+Запуск через переменные окружения:
+
+```bash
+ADDRESS=localhost:9090 RATE_LIMIT=5 KEY=mysecret go run ./cmd/agent
 ```
 
 ![alt text](image.png)
