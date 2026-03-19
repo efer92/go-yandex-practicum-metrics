@@ -2,10 +2,12 @@ package agent
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 )
@@ -73,6 +75,29 @@ func TestCollector_MultipleCollects(t *testing.T) {
 		if _, ok := c.metrics.Gauge[name]; !ok {
 			t.Errorf("Missing metric: %s", name)
 		}
+	}
+}
+
+func TestCollector_CollectExtra(t *testing.T) {
+	c := NewCollector()
+	err := c.CollectExtra()
+	if err != nil {
+		t.Fatalf("CollectExtra() unexpected error: %v", err)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, ok := c.metrics.Gauge["TotalMemory"]; !ok {
+		t.Error("Missing metric: TotalMemory")
+	}
+	if _, ok := c.metrics.Gauge["FreeMemory"]; !ok {
+		t.Error("Missing metric: FreeMemory")
+	}
+
+	// Должна быть хотя бы CPUutilization1
+	if _, ok := c.metrics.Gauge["CPUutilization1"]; !ok {
+		t.Error("Missing metric: CPUutilization1")
 	}
 }
 
@@ -217,22 +242,55 @@ func TestSender_SendMetrics_Error(t *testing.T) {
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
 
-func TestAgent_Report(t *testing.T) {
+func TestAgent_WorkerSendsBatch(t *testing.T) {
+	received := make(chan struct{}, 10)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- struct{}{}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	a := &Agent{
-		collector: NewCollector(),
-		sender:    NewSender(server.URL, ""),
+	ag := NewWithConfig(server.URL, 50*time.Millisecond, 100*time.Millisecond, nil, "", 2)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	go ag.Run(ctx)
+	<-ctx.Done()
+
+	if len(received) == 0 {
+		t.Error("expected at least one request to be sent")
 	}
+}
 
-	a.collector.Collect()
+func TestAgent_RateLimitRespected(t *testing.T) {
+	concurrent := 0
+	maxConcurrent := 0
+	done := make(chan struct{})
 
-	err := a.report()
-	if err != nil {
-		t.Errorf("Report failed: %v", err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		concurrent++
+		if concurrent > maxConcurrent {
+			maxConcurrent = concurrent
+		}
+		time.Sleep(10 * time.Millisecond)
+		concurrent--
+		done <- struct{}{}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	const limit = 2
+	ag := NewWithConfig(server.URL, 10*time.Millisecond, 20*time.Millisecond, nil, "", limit)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	go ag.Run(ctx)
+	<-ctx.Done()
+
+	if maxConcurrent > limit {
+		t.Errorf("rate limit exceeded: max concurrent = %d, limit = %d", maxConcurrent, limit)
 	}
 }
 
