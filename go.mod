@@ -1,6 +1,6 @@
 module github.com/efer92/go-yandex-practicum-metrics
 
-go 1.24.13
+go 1.25
 
 require (
 	github.com/avast/retry-go/v4 v4.7.0
