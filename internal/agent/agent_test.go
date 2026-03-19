@@ -112,7 +112,7 @@ func TestSender_SendGauge(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sender := NewSender(server.URL)
+	sender := NewSender(server.URL, "")
 	val := 123.456
 	err := sender.send(model.Metrics{ID: "Alloc", MType: model.Gauge, Value: &val})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestSender_SendCounter(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sender := NewSender(server.URL)
+	sender := NewSender(server.URL, "")
 	delta := int64(5)
 	err := sender.send(model.Metrics{ID: "PollCount", MType: model.Counter, Delta: &delta})
 	if err != nil {
@@ -154,7 +154,7 @@ func TestSender_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sender := NewSender(server.URL)
+	sender := NewSender(server.URL, "")
 	val := 1.0
 	err := sender.send(model.Metrics{ID: "test", MType: model.Gauge, Value: &val})
 	if err == nil {
@@ -170,7 +170,7 @@ func TestSender_SendMetrics(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sender := NewSender(server.URL)
+	sender := NewSender(server.URL, "")
 
 	snapshot := Metrics{
 		Gauge:   map[string]float64{"metric1": 1.0, "metric2": 2.0},
@@ -201,7 +201,7 @@ func TestSender_SendMetrics_Error(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sender := NewSender(server.URL)
+	sender := NewSender(server.URL, "")
 
 	snapshot := Metrics{
 		Gauge:   map[string]float64{"metric1": 1.0, "metric2": 2.0},
@@ -225,7 +225,7 @@ func TestAgent_Report(t *testing.T) {
 
 	a := &Agent{
 		collector: NewCollector(),
-		sender:    NewSender(server.URL),
+		sender:    NewSender(server.URL, ""),
 	}
 
 	a.collector.Collect()

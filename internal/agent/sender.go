@@ -9,18 +9,23 @@ import (
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/compress"
+	"github.com/efer92/go-yandex-practicum-metrics/pkg/hash"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/retry"
 )
+
+const headerHashSHA256 = "HashSHA256"
 
 type Sender struct {
 	serverURL  string
 	httpClient *http.Client
+	key        string
 }
 
-func NewSender(serverURL string) *Sender {
+func NewSender(serverURL string, key string) *Sender {
 	return &Sender{
 		serverURL:  serverURL,
 		httpClient: &http.Client{},
+		key:        key,
 	}
 }
 
@@ -31,6 +36,31 @@ func isRetriableHTTPError(err error) bool {
 		return netErr.Timeout() || netErr.Temporary()
 	}
 	return false
+}
+
+// newRequest создаёт POST-запрос с gzip-телом и опциональной подписью HashSHA256.
+func (s *Sender) newRequest(url string, body []byte) (*http.Request, error) {
+	buf, err := compress.GzipData(body)
+	if err != nil {
+		return nil, fmt.Errorf("compress: %w", err)
+	}
+
+	// buf — io.Reader после GzipData; нам нужны raw bytes для подписи,
+	// поэтому подписываем исходный body (до сжатия), как требует задание:
+	// hash считается от тела запроса (JSON), а не от сжатых байт.
+	req, err := http.NewRequest(http.MethodPost, url, buf)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	if s.key != "" {
+		req.Header.Set(headerHashSHA256, hash.Sign(body, s.key))
+	}
+
+	return req, nil
 }
 
 func (s *Sender) SendMetrics(metrics []model.Metrics) error {
@@ -50,18 +80,10 @@ func (s *Sender) send(m model.Metrics) error {
 		return fmt.Errorf("marshal metric: %w", err)
 	}
 
-	buf, err := compress.GzipData(body)
+	req, err := s.newRequest(s.serverURL+"/update", body)
 	if err != nil {
-		return fmt.Errorf("compress metric %s: %w", m.ID, err)
+		return fmt.Errorf("build request for metric %s: %w", m.ID, err)
 	}
-
-	req, err := http.NewRequest(http.MethodPost, s.serverURL+"/update", buf)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -92,18 +114,10 @@ func (s *Sender) sendBatch(metrics []model.Metrics) error {
 		return fmt.Errorf("marshal metrics: %w", err)
 	}
 
-	buf, err := compress.GzipData(body)
+	req, err := s.newRequest(s.serverURL+"/updates/", body)
 	if err != nil {
-		return fmt.Errorf("compress metrics: %w", err)
+		return fmt.Errorf("build batch request: %w", err)
 	}
-
-	req, err := http.NewRequest(http.MethodPost, s.serverURL+"/updates/", buf)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {

@@ -9,8 +9,8 @@ import (
 	"github.com/efer92/go-yandex-practicum-metrics/internal/config/db"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/retry"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type DBStorage struct {

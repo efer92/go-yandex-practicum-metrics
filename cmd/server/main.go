@@ -21,12 +21,13 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pinger) http.Handler {
+func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pinger, key string) http.Handler {
 	h := handler.NewMetricHandler(svc, logger, pinger)
 
 	r := chi.NewRouter()
 	r.Use(custommiddleware.Logger(logger))
 	r.Use(custommiddleware.GzipMiddleware)
+	r.Use(custommiddleware.HashMiddleware(key))
 	r.Use(middleware.Recoverer)
 	r.Mount("/", h.Routes())
 
@@ -98,7 +99,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      newRouter(svc, logger, pinger),
+		Handler:      newRouter(svc, logger, pinger, cfg.Key),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
