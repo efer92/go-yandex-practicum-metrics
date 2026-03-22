@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
@@ -17,9 +18,10 @@ type Agent struct {
 	log            *zap.Logger
 }
 
+// NewWithConfig создаёт агента. Если rateLimit <= 0 — завершает процесс с ошибкой:
 func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration, logger *zap.Logger, key string, rateLimit int) *Agent {
 	if rateLimit <= 0 {
-		rateLimit = 1
+		logger.Fatal("rateLimit must be > 0", zap.Int("rateLimit", rateLimit))
 	}
 	return &Agent{
 		collector:      NewCollector(),
@@ -31,23 +33,46 @@ func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration,
 	}
 }
 
+// Run запускает агента и блокируется до отмены ctx.
+// Graceful shutdown: ждёт завершения всех горутин перед возвратом.
 func (a *Agent) Run(ctx context.Context) {
-	// Канал для передачи батчей метрик воркерам.
 	jobs := make(chan []model.Metrics, a.rateLimit)
 
-	// Запускаем worker pool — ограничивает число одновременных запросов.
+	var wg sync.WaitGroup
+
+	// Worker pool — ограничивает число одновременных запросов.
 	for i := 0; i < a.rateLimit; i++ {
-		go a.worker(ctx, jobs)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			a.worker(ctx, jobs)
+		}()
 	}
 
 	// Горутина 1: сбор runtime-метрик.
-	go a.runCollect(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		a.runCollect(ctx)
+	}()
 
-	// Горутина 2: сбор extra-метрик (gopsutil).
-	go a.runCollectExtra(ctx)
+	// Горутина 2: сбор extra-метрик.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		a.runCollectExtra(ctx)
+	}()
 
-	// Горутина 3: отправка — кладёт снапшоты в канал jobs.
-	a.runReport(ctx, jobs)
+	// Горутина 3: отправка снапшотов в канал jobs.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(jobs)
+		a.runReport(ctx, jobs)
+	}()
+
+	wg.Wait()
+	a.log.Info("agent stopped")
 }
 
 // runCollect периодически вызывает Collect.
@@ -64,7 +89,7 @@ func (a *Agent) runCollect(ctx context.Context) {
 			return
 		case <-ticker.C:
 			a.collector.Collect()
-			a.log.Info("runtime metrics collected")
+			a.log.Debug("runtime metrics collected")
 		}
 	}
 }
@@ -80,15 +105,16 @@ func (a *Agent) runCollectExtra(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := a.collector.CollectExtra(); err != nil {
-				a.log.Warn("extra metrics collection failed", zap.Error(err))
+				a.log.Error("extra metrics collection failed", zap.Error(err))
 			} else {
-				a.log.Info("extra metrics collected")
+				a.log.Debug("extra metrics collected")
 			}
 		}
 	}
 }
 
-// runReport периодически снимает снапшот и отправляет его в канал jobs.
+// runReport периодически снимает снапшот и кладёт его в канал jobs.
+// Закрывает jobs при выходе — воркеры узнают о завершении через закрытый канал.
 func (a *Agent) runReport(ctx context.Context, jobs chan<- []model.Metrics) {
 	ticker := time.NewTicker(a.reportInterval)
 	defer ticker.Stop()
@@ -109,7 +135,6 @@ func (a *Agent) runReport(ctx context.Context, jobs chan<- []model.Metrics) {
 	}
 }
 
-// worker читает из канала jobs и отправляет батч на сервер.
 func (a *Agent) worker(ctx context.Context, jobs <-chan []model.Metrics) {
 	for {
 		select {
@@ -122,7 +147,7 @@ func (a *Agent) worker(ctx context.Context, jobs <-chan []model.Metrics) {
 			if err := a.sender.SendBatch(metrics); err != nil {
 				a.log.Error("failed to send batch", zap.Error(err))
 			} else {
-				a.log.Info("metrics batch sent", zap.Int("count", len(metrics)))
+				a.log.Debug("metrics batch sent", zap.Int("count", len(metrics)))
 			}
 		}
 	}

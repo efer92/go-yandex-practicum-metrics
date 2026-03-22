@@ -66,7 +66,6 @@ func (c *Collector) Collect() {
 }
 
 // CollectExtra собирает дополнительные метрики через gopsutil.
-// Вызывается в отдельной горутине.
 func (c *Collector) CollectExtra() error {
 	vmStat, err := mem.VirtualMemory()
 	if err != nil {
@@ -83,7 +82,6 @@ func (c *Collector) CollectExtra() error {
 
 	c.metrics.Gauge["TotalMemory"] = float64(vmStat.Total)
 	c.metrics.Gauge["FreeMemory"] = float64(vmStat.Free)
-
 	for i, pct := range cpuPercents {
 		c.metrics.Gauge[fmt.Sprintf("CPUutilization%d", i+1)] = pct
 	}
@@ -91,7 +89,7 @@ func (c *Collector) CollectExtra() error {
 	return nil
 }
 
-// GetSnapshot возвращает копию текущих метрик и сбрасывает счётчик.
+// GetSnapshot возвращает копию текущих метрик.
 func (c *Collector) GetSnapshot() Metrics {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -103,6 +101,13 @@ func (c *Collector) GetSnapshot() Metrics {
 	for k, v := range c.metrics.Gauge {
 		snapshot.Gauge[k] = v
 	}
-	c.metrics.Counter = 0
 	return snapshot
+}
+
+// AckCounter уменьшает счётчик на delta после успешной отправки метрик на сервер.
+// Если между снапшотом и отправкой пришли новые Collect — их инкремент сохранится.
+func (c *Collector) AckCounter(delta int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.metrics.Counter -= delta
 }

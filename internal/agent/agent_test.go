@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
+	"go.uber.org/zap"
 )
 
 // ─── Collector ────────────────────────────────────────────────────────────────
@@ -18,20 +20,21 @@ func TestCollector_Collect(t *testing.T) {
 	c := NewCollector()
 	c.Collect()
 
-	metrics := c.metrics
+	// Используем GetSnapshot вместо прямого доступа к полям
+	snapshot := c.GetSnapshot()
 
-	if metrics.Counter != 1 {
-		t.Errorf("Expected Counter=1, got %d", metrics.Counter)
+	if snapshot.Counter != 1 {
+		t.Errorf("Expected Counter=1, got %d", snapshot.Counter)
 	}
 
 	required := []string{"Alloc", "HeapAlloc", "RandomValue", "TotalAlloc"}
 	for _, name := range required {
-		if _, ok := metrics.Gauge[name]; !ok {
+		if _, ok := snapshot.Gauge[name]; !ok {
 			t.Errorf("Missing required metric: %s", name)
 		}
 	}
 
-	if metrics.Gauge["RandomValue"] < 0 || metrics.Gauge["RandomValue"] >= 1 {
+	if snapshot.Gauge["RandomValue"] < 0 || snapshot.Gauge["RandomValue"] >= 1 {
 		t.Error("RandomValue out of range [0,1)")
 	}
 }
@@ -45,10 +48,6 @@ func TestCollector_GetSnapshot(t *testing.T) {
 	if snapshot.Counter != 2 {
 		t.Errorf("Expected snapshot Counter=2, got %d", snapshot.Counter)
 	}
-
-	if c.metrics.Counter != 0 {
-		t.Error("Counter should be reset after GetSnapshot")
-	}
 }
 
 func TestCollector_MultipleCollects(t *testing.T) {
@@ -58,8 +57,10 @@ func TestCollector_MultipleCollects(t *testing.T) {
 		c.Collect()
 	}
 
-	if c.metrics.Counter != 5 {
-		t.Errorf("Expected Counter=5, got %d", c.metrics.Counter)
+	snapshot := c.GetSnapshot()
+
+	if snapshot.Counter != 5 {
+		t.Errorf("Expected Counter=5, got %d", snapshot.Counter)
 	}
 
 	expectedMetrics := []string{
@@ -72,7 +73,7 @@ func TestCollector_MultipleCollects(t *testing.T) {
 	}
 
 	for _, name := range expectedMetrics {
-		if _, ok := c.metrics.Gauge[name]; !ok {
+		if _, ok := snapshot.Gauge[name]; !ok {
 			t.Errorf("Missing metric: %s", name)
 		}
 	}
@@ -85,18 +86,16 @@ func TestCollector_CollectExtra(t *testing.T) {
 		t.Fatalf("CollectExtra() unexpected error: %v", err)
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	// Используем GetSnapshot вместо прямого c.mu.Lock()
+	snapshot := c.GetSnapshot()
 
-	if _, ok := c.metrics.Gauge["TotalMemory"]; !ok {
+	if _, ok := snapshot.Gauge["TotalMemory"]; !ok {
 		t.Error("Missing metric: TotalMemory")
 	}
-	if _, ok := c.metrics.Gauge["FreeMemory"]; !ok {
+	if _, ok := snapshot.Gauge["FreeMemory"]; !ok {
 		t.Error("Missing metric: FreeMemory")
 	}
-
-	// Должна быть хотя бы CPUutilization1
-	if _, ok := c.metrics.Gauge["CPUutilization1"]; !ok {
+	if _, ok := snapshot.Gauge["CPUutilization1"]; !ok {
 		t.Error("Missing metric: CPUutilization1")
 	}
 }
@@ -188,9 +187,9 @@ func TestSender_ServerError(t *testing.T) {
 }
 
 func TestSender_SendMetrics(t *testing.T) {
-	requestCount := 0
+	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		requestCount.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -208,17 +207,15 @@ func TestSender_SendMetrics(t *testing.T) {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
-	// 2 gauge + 1 counter = 3 запроса
-	if requestCount != 3 {
-		t.Errorf("Expected 3 requests, got %d", requestCount)
+	if got := int(requestCount.Load()); got != 3 {
+		t.Errorf("Expected 3 requests, got %d", got)
 	}
 }
 
 func TestSender_SendMetrics_Error(t *testing.T) {
-	callCount := 0
+	var callCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		if callCount > 1 {
+		if callCount.Add(1) > 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -243,54 +240,54 @@ func TestSender_SendMetrics_Error(t *testing.T) {
 // ─── Agent ────────────────────────────────────────────────────────────────────
 
 func TestAgent_WorkerSendsBatch(t *testing.T) {
-	received := make(chan struct{}, 10)
+	var received atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		received <- struct{}{}
+		received.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	ag := NewWithConfig(server.URL, 50*time.Millisecond, 100*time.Millisecond, nil, "", 2)
+	ag := NewWithConfig(server.URL, 50*time.Millisecond, 100*time.Millisecond, zap.NewNop(), "", 2)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 	defer cancel()
 
-	go ag.Run(ctx)
-	<-ctx.Done()
+	ag.Run(ctx)
 
-	if len(received) == 0 {
+	if received.Load() == 0 {
 		t.Error("expected at least one request to be sent")
 	}
 }
 
 func TestAgent_RateLimitRespected(t *testing.T) {
-	concurrent := 0
-	maxConcurrent := 0
-	done := make(chan struct{})
+	var concurrent atomic.Int32
+	var maxConcurrent atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		concurrent++
-		if concurrent > maxConcurrent {
-			maxConcurrent = concurrent
+		cur := concurrent.Add(1)
+		// обновляем максимум атомарно
+		for {
+			old := maxConcurrent.Load()
+			if cur <= old || maxConcurrent.CompareAndSwap(old, cur) {
+				break
+			}
 		}
-		time.Sleep(10 * time.Millisecond)
-		concurrent--
-		done <- struct{}{}
+		time.Sleep(20 * time.Millisecond)
+		concurrent.Add(-1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
 	const limit = 2
-	ag := NewWithConfig(server.URL, 10*time.Millisecond, 20*time.Millisecond, nil, "", limit)
+	ag := NewWithConfig(server.URL, 10*time.Millisecond, 20*time.Millisecond, zap.NewNop(), "", limit)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
-	go ag.Run(ctx)
-	<-ctx.Done()
+	ag.Run(ctx)
 
-	if maxConcurrent > limit {
-		t.Errorf("rate limit exceeded: max concurrent = %d, limit = %d", maxConcurrent, limit)
+	if got := maxConcurrent.Load(); got > limit {
+		t.Errorf("rate limit exceeded: max concurrent = %d, limit = %d", got, limit)
 	}
 }
 
@@ -304,7 +301,6 @@ func TestConvertToModelMetrics(t *testing.T) {
 
 	result := convertToModelMetrics(snapshot)
 
-	// 2 gauge + 1 counter
 	if len(result) != 3 {
 		t.Errorf("Expected 3 metrics, got %d", len(result))
 	}
