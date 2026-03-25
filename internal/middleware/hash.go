@@ -6,9 +6,8 @@ import (
 	"net/http"
 
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/hash"
+	"go.uber.org/zap"
 )
-
-const HeaderHashSHA256 = "HashSHA256"
 
 // hashResponseWriter буферизует ответ, чтобы подписать его перед отправкой.
 type hashResponseWriter struct {
@@ -28,7 +27,7 @@ func (w *hashResponseWriter) Write(b []byte) (int, error) {
 func (w *hashResponseWriter) flush(key string) {
 	body := w.buf.Bytes()
 	if key != "" {
-		w.ResponseWriter.Header().Set(HeaderHashSHA256, hash.Sign(body, key))
+		w.ResponseWriter.Header().Set("HashSHA256", hash.Sign(body, key))
 	}
 	if w.status != 0 {
 		w.ResponseWriter.WriteHeader(w.status)
@@ -36,26 +35,27 @@ func (w *hashResponseWriter) flush(key string) {
 	w.ResponseWriter.Write(body) //nolint:errcheck
 }
 
-// HashMiddleware проверяет подпись входящего запроса и подписывает ответ
-func HashMiddleware(key string) func(http.Handler) http.Handler {
+// HashMiddleware возвращает nil если ключ не задан — middleware не подключается вовсе.
+// При наличии ключа проверяет подпись входящего запроса и подписывает ответ.
+func HashMiddleware(key string, logger *zap.Logger) func(http.Handler) http.Handler {
+	if key == "" {
+		return nil
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if key == "" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				http.Error(w, "failed to read body", http.StatusInternalServerError)
+				logger.Error("failed to read request body", zap.Error(err))
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
 
-			if incoming := r.Header.Get(HeaderHashSHA256); incoming != "" {
+			if incoming := r.Header.Get("HashSHA256"); incoming != "" {
 				expected := hash.Sign(body, key)
 				if !hash.Equal(incoming, expected) {
-					http.Error(w, "invalid hash", http.StatusBadRequest)
+					http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 					return
 				}
 			}

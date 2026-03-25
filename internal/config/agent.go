@@ -12,6 +12,7 @@ type AgentConfig struct {
 	PollInterval   int
 	ReportInterval int
 	Key            string
+	RateLimit      int
 }
 
 func ParseAgentConfig(args []string) (AgentConfig, error) {
@@ -22,6 +23,7 @@ func ParseAgentConfig(args []string) (AgentConfig, error) {
 	fs.IntVar(&cfg.ReportInterval, "r", 10, "Report interval in seconds")
 	fs.IntVar(&cfg.PollInterval, "p", 2, "Poll interval in seconds")
 	fs.StringVar(&cfg.Key, "k", "", "Signing key for HMAC-SHA256")
+	fs.IntVar(&cfg.RateLimit, "l", 1, "Max concurrent outgoing requests")
 	fs.Parse(args)
 
 	if env, ok := os.LookupEnv("ADDRESS"); ok {
@@ -43,6 +45,13 @@ func ParseAgentConfig(args []string) (AgentConfig, error) {
 	}
 	if env, ok := os.LookupEnv("KEY"); ok {
 		cfg.Key = env
+	}
+	if env, ok := os.LookupEnv("RATE_LIMIT"); ok {
+		v, err := strconv.Atoi(env)
+		if err != nil {
+			return AgentConfig{}, fmt.Errorf("invalid RATE_LIMIT %q: %w", env, err)
+		}
+		cfg.RateLimit = v
 	}
 
 	return cfg, nil

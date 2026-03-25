@@ -1,77 +1,113 @@
 package agent
 
 import (
+	"fmt"
 	"math/rand"
 	"runtime"
+	"sync"
+
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
-// Metrics хранит собранные метрики
 type Metrics struct {
 	Gauge   map[string]float64
 	Counter int64
 }
 
-// Collector собирает метрики из runtime
 type Collector struct {
+	mu      sync.Mutex
 	metrics Metrics
 }
 
 func NewCollector() *Collector {
 	return &Collector{
-		metrics: Metrics{
-			Gauge: make(map[string]float64),
-		},
+		metrics: Metrics{Gauge: make(map[string]float64)},
 	}
 }
 
-// Collect собирает метрики из пакета runtime
+// Collect собирает метрики runtime.
 func (c *Collector) Collect() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
 
-	// Мапа всех gauge-метрик: имя -> значение
-	gauges := map[string]float64{
-		"Alloc":         float64(m.Alloc),
-		"BuckHashSys":   float64(m.BuckHashSys),
-		"Frees":         float64(m.Frees),
-		"GCCPUFraction": m.GCCPUFraction,
-		"GCSys":         float64(m.GCSys),
-		"HeapAlloc":     float64(m.HeapAlloc),
-		"HeapIdle":      float64(m.HeapIdle),
-		"HeapInuse":     float64(m.HeapInuse),
-		"HeapObjects":   float64(m.HeapObjects),
-		"HeapReleased":  float64(m.HeapReleased),
-		"HeapSys":       float64(m.HeapSys),
-		"LastGC":        float64(m.LastGC),
-		"Lookups":       float64(m.Lookups),
-		"MCacheInuse":   float64(m.MCacheInuse),
-		"MCacheSys":     float64(m.MCacheSys),
-		"MSpanInuse":    float64(m.MSpanInuse),
-		"MSpanSys":      float64(m.MSpanSys),
-		"Mallocs":       float64(m.Mallocs),
-		"NextGC":        float64(m.NextGC),
-		"NumForcedGC":   float64(m.NumForcedGC),
-		"NumGC":         float64(m.NumGC),
-		"OtherSys":      float64(m.OtherSys),
-		"PauseTotalNs":  float64(m.PauseTotalNs),
-		"StackInuse":    float64(m.StackInuse),
-		"StackSys":      float64(m.StackSys),
-		"Sys":           float64(m.Sys),
-		"TotalAlloc":    float64(m.TotalAlloc),
-		"RandomValue":   rand.Float64(),
-	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	// Копируем в хранилище метрик
-	for name, value := range gauges {
-		c.metrics.Gauge[name] = value
-	}
-
-	c.metrics.Counter++ // PollCount
+	c.metrics.Gauge["Alloc"] = float64(ms.Alloc)
+	c.metrics.Gauge["BuckHashSys"] = float64(ms.BuckHashSys)
+	c.metrics.Gauge["Frees"] = float64(ms.Frees)
+	c.metrics.Gauge["GCCPUFraction"] = ms.GCCPUFraction
+	c.metrics.Gauge["GCSys"] = float64(ms.GCSys)
+	c.metrics.Gauge["HeapAlloc"] = float64(ms.HeapAlloc)
+	c.metrics.Gauge["HeapIdle"] = float64(ms.HeapIdle)
+	c.metrics.Gauge["HeapInuse"] = float64(ms.HeapInuse)
+	c.metrics.Gauge["HeapObjects"] = float64(ms.HeapObjects)
+	c.metrics.Gauge["HeapReleased"] = float64(ms.HeapReleased)
+	c.metrics.Gauge["HeapSys"] = float64(ms.HeapSys)
+	c.metrics.Gauge["LastGC"] = float64(ms.LastGC)
+	c.metrics.Gauge["Lookups"] = float64(ms.Lookups)
+	c.metrics.Gauge["MCacheInuse"] = float64(ms.MCacheInuse)
+	c.metrics.Gauge["MCacheSys"] = float64(ms.MCacheSys)
+	c.metrics.Gauge["MSpanInuse"] = float64(ms.MSpanInuse)
+	c.metrics.Gauge["MSpanSys"] = float64(ms.MSpanSys)
+	c.metrics.Gauge["Mallocs"] = float64(ms.Mallocs)
+	c.metrics.Gauge["NextGC"] = float64(ms.NextGC)
+	c.metrics.Gauge["NumForcedGC"] = float64(ms.NumForcedGC)
+	c.metrics.Gauge["NumGC"] = float64(ms.NumGC)
+	c.metrics.Gauge["OtherSys"] = float64(ms.OtherSys)
+	c.metrics.Gauge["PauseTotalNs"] = float64(ms.PauseTotalNs)
+	c.metrics.Gauge["StackInuse"] = float64(ms.StackInuse)
+	c.metrics.Gauge["StackSys"] = float64(ms.StackSys)
+	c.metrics.Gauge["Sys"] = float64(ms.Sys)
+	c.metrics.Gauge["TotalAlloc"] = float64(ms.TotalAlloc)
+	c.metrics.Gauge["RandomValue"] = rand.Float64()
+	c.metrics.Counter++
 }
 
-// GetSnapshot возвращает копию текущих метрик и сбрасывает счетчик
+// CollectExtra собирает дополнительные метрики через gopsutil.
+func (c *Collector) CollectExtra() error {
+	vmStat, err := mem.VirtualMemory()
+	if err != nil {
+		return fmt.Errorf("get virtual memory: %w", err)
+	}
+
+	cpuPercents, err := cpu.Percent(0, true)
+	if err != nil {
+		return fmt.Errorf("get cpu percent: %w", err)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.metrics.Gauge["TotalMemory"] = float64(vmStat.Total)
+	c.metrics.Gauge["FreeMemory"] = float64(vmStat.Free)
+	for i, pct := range cpuPercents {
+		c.metrics.Gauge[fmt.Sprintf("CPUutilization%d", i+1)] = pct
+	}
+
+	return nil
+}
+
+// GetSnapshot возвращает копию текущих метрик.
 func (c *Collector) GetSnapshot() Metrics {
-	snapshot := c.metrics
-	c.metrics.Counter = 0 // Сбрасываем после получения
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	snapshot := Metrics{
+		Gauge:   make(map[string]float64, len(c.metrics.Gauge)),
+		Counter: c.metrics.Counter,
+	}
+	for k, v := range c.metrics.Gauge {
+		snapshot.Gauge[k] = v
+	}
 	return snapshot
+}
+
+// AckCounter уменьшает счётчик на delta после успешной отправки метрик на сервер.
+// Если между снапшотом и отправкой пришли новые Collect — их инкремент сохранится.
+func (c *Collector) AckCounter(delta int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.metrics.Counter -= delta
 }

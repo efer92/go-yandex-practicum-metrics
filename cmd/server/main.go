@@ -27,7 +27,9 @@ func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pi
 	r := chi.NewRouter()
 	r.Use(custommiddleware.Logger(logger))
 	r.Use(custommiddleware.GzipMiddleware)
-	r.Use(custommiddleware.HashMiddleware(key))
+	if m := custommiddleware.HashMiddleware(key, logger); m != nil {
+		r.Use(m)
+	}
 	r.Use(middleware.Recoverer)
 	r.Mount("/", h.Routes())
 
@@ -44,7 +46,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to init logger: %v", err)
 	}
-	defer logger.Sync()
+	defer func() {
+		_ = logger.Sync()
+	}()
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
