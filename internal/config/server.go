@@ -13,6 +13,7 @@ type ServerConfig struct {
 	FileStoragePath string
 	Restore         bool
 	DatabaseDSN     string
+	Key             string
 }
 
 func ParseServerConfig(args []string) (ServerConfig, error) {
@@ -24,6 +25,7 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs.StringVar(&cfg.FileStoragePath, "f", "/tmp/metrics-db.json", "File storage path")
 	fs.BoolVar(&cfg.Restore, "r", true, "Restore metrics from file on start")
 	fs.StringVar(&cfg.DatabaseDSN, "d", "", "PostgreSQL DSN")
+	fs.StringVar(&cfg.Key, "k", "", "Signing key for HMAC-SHA256")
 	fs.Parse(args)
 
 	if env, ok := os.LookupEnv("ADDRESS"); ok {
@@ -48,6 +50,9 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	}
 	if env, ok := os.LookupEnv("DATABASE_DSN"); ok {
 		cfg.DatabaseDSN = env
+	}
+	if env, ok := os.LookupEnv("KEY"); ok {
+		cfg.Key = env
 	}
 
 	return cfg, nil

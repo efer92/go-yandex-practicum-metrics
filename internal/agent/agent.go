@@ -15,21 +15,11 @@ type Agent struct {
 	log            *zap.Logger
 }
 
-// New создает агента с дефолтными настройками
-func New() *Agent {
-	return NewWithConfig(
-		"http://localhost:8080",
-		2*time.Second,
-		10*time.Second,
-		zap.NewNop(),
-	)
-}
-
 // NewWithConfig создает агента с кастомными настройками
-func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration, logger *zap.Logger) *Agent {
+func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration, logger *zap.Logger, key string) *Agent {
 	return &Agent{
 		collector:      NewCollector(),
-		sender:         NewSender(serverURL),
+		sender:         NewSender(serverURL, key),
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
 		log:            logger,
@@ -67,7 +57,7 @@ func (a *Agent) report() error {
 	return a.sender.SendMetrics(metrics)
 }
 
-// convertToModelMetrics конвертирует внутренний снапшот в []model.Metrics для отправки
+// convertToModelMetrics конвертирует внутренний снапшот для отправки
 func convertToModelMetrics(snapshot Metrics) []model.Metrics {
 	result := make([]model.Metrics, 0, len(snapshot.Gauge)+1)
 

@@ -27,6 +27,7 @@ func main() {
 		time.Duration(cfg.PollInterval)*time.Second,
 		time.Duration(cfg.ReportInterval)*time.Second,
 		logger,
+		cfg.Key,
 	)
 
 	logger.Info("agent started",
