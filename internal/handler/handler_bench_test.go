@@ -96,4 +96,3 @@ func BenchmarkHandler_GetValueJSON(b *testing.B) {
 		r.ServeHTTP(rr, req)
 	}
 }
-
