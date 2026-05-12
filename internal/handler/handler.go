@@ -249,6 +249,8 @@ type MetricView struct {
 	Value string
 }
 
+var listTemplate = template.Must(template.New("metrics").Parse(htmlTemplate))
+
 const htmlTemplate = `
 <!DOCTYPE html>
 <html lang="en">
@@ -369,16 +371,17 @@ const htmlTemplate = `
 func (h *MetricHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
 	metrics := h.svc.GetAllMetrics(r.Context())
 
-	var data []MetricView
+	data := make([]MetricView, 0, len(metrics))
 	for key, val := range metrics {
-		parts := strings.SplitN(key, "/", 2)
-		if len(parts) == 2 {
-			data = append(data, MetricView{
-				Type:  parts[0],
-				Name:  parts[1],
-				Value: val,
-			})
+		i := strings.IndexByte(key, '/')
+		if i < 0 {
+			continue
 		}
+		data = append(data, MetricView{
+			Type:  key[:i],
+			Name:  key[i+1:],
+			Value: val,
+		})
 	}
 
 	sort.Slice(data, func(i, j int) bool {
@@ -388,15 +391,9 @@ func (h *MetricHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
 		return data[i].Name < data[j].Name
 	})
 
-	tmpl, err := template.New("metrics").Parse(htmlTemplate)
-	if err != nil {
-		h.internalError(w, "failed to parse template", err)
-		return
-	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	if err := tmpl.Execute(w, data); err != nil {
+	if err := listTemplate.Execute(w, data); err != nil {
 		h.log.Error("failed to execute template", zap.Error(err))
 	}
 }

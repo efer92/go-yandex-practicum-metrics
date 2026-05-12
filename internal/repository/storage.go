@@ -101,7 +101,7 @@ func (s *MemStorage) GetAllMetrics(_ context.Context) map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make(map[string]string)
+	result := make(map[string]string, len(s.gauges)+len(s.counters))
 	for name, val := range s.gauges {
 		result["gauge/"+name] = strconv.FormatFloat(val, 'f', -1, 64)
 	}
