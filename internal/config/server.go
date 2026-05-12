@@ -1,3 +1,4 @@
+// Package config parses server and agent configuration from CLI flags and environment variables.
 package config
 
 import (
@@ -7,6 +8,7 @@ import (
 	"strconv"
 )
 
+// ServerConfig holds runtime parameters for cmd/server.
 type ServerConfig struct {
 	Addr            string
 	StoreInterval   int
@@ -18,6 +20,7 @@ type ServerConfig struct {
 	AuditURL        string
 }
 
+// ParseServerConfig reads flags from args, then overlays the corresponding environment variables.
 func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs := flag.NewFlagSet("server", flag.ExitOnError)
 

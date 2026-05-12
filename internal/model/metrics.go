@@ -1,15 +1,14 @@
+// Package model defines the wire format used between the agent, server, and storage.
 package model
 
+// Metric type identifiers used in URLs and JSON payloads.
 const (
 	Counter = "counter"
 	Gauge   = "gauge"
 )
 
-// NOTE: Не усложняем пример, вводя иерархическую вложенность структур.
-// Органичиваясь плоской моделью.
-// Delta и Value объявлены через указатели,
-// что бы отличать значение "0", от не заданного значения
-// и соответственно не кодировать в структуру.
+// Metrics is the flat wire representation of a single metric.
+// Delta and Value are pointers so that a missing field is distinguishable from a zero value.
 type Metrics struct {
 	ID    string   `json:"id"`
 	MType string   `json:"type"`

@@ -1,3 +1,4 @@
+// Package db wires up the PostgreSQL connection used by the storage layer and applies migrations.
 package db
 
 import (
@@ -13,7 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// Config параметры подключения к PostgreSQL.
+// Config holds PostgreSQL connection-pool parameters.
 type Config struct {
 	DSN             string
 	MaxOpenConns    int
@@ -21,7 +22,7 @@ type Config struct {
 	ConnMaxLifetime time.Duration
 }
 
-// DefaultConfig возвращает конфиг с разумными дефолтами.
+// DefaultConfig returns a Config with reasonable pool defaults for the given DSN.
 func DefaultConfig(dsn string) Config {
 	return Config{
 		DSN:             dsn,
@@ -31,7 +32,7 @@ func DefaultConfig(dsn string) Config {
 	}
 }
 
-// Connect открывает соединение с БД и проверяет его.
+// Connect opens a *sql.DB, configures the pool, and verifies the connection.
 func Connect(ctx context.Context, cfg Config) (*sql.DB, error) {
 	db, err := sql.Open("pgx", cfg.DSN)
 	if err != nil {
@@ -50,7 +51,7 @@ func Connect(ctx context.Context, cfg Config) (*sql.DB, error) {
 	return db, nil
 }
 
-// Migrate применяет все pending миграции из sql/.
+// Migrate applies every pending migration embedded in the migrations package.
 func Migrate(db *sql.DB) error {
 	src, err := iofs.New(migrations.FS, "sql")
 	if err != nil {

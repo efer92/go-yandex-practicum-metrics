@@ -1,3 +1,4 @@
+// Package repository provides metric storage backends behind a common interface.
 package repository
 
 import (
@@ -8,6 +9,7 @@ import (
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 )
 
+// Storage is the persistence contract implemented by every backend (in-memory, file-backed, database).
 type Storage interface {
 	UpdateGauge(ctx context.Context, name string, value float64) error
 	UpdateCounter(ctx context.Context, name string, value int64) error
@@ -17,12 +19,14 @@ type Storage interface {
 	GetAllMetrics(ctx context.Context) map[string]string
 }
 
+// MemStorage is the in-memory Storage implementation, safe for concurrent use.
 type MemStorage struct {
 	mu       sync.RWMutex
 	gauges   map[string]float64
 	counters map[string]int64
 }
 
+// NewMemStorage returns an empty MemStorage.
 func NewMemStorage() *MemStorage {
 	return &MemStorage{
 		gauges:   make(map[string]float64),
@@ -30,6 +34,7 @@ func NewMemStorage() *MemStorage {
 	}
 }
 
+// UpdateGauge sets the gauge value, replacing any previous one.
 func (s *MemStorage) UpdateGauge(_ context.Context, name string, value float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -37,6 +42,7 @@ func (s *MemStorage) UpdateGauge(_ context.Context, name string, value float64) 
 	return nil
 }
 
+// UpdateCounter adds the delta to the current counter value.
 func (s *MemStorage) UpdateCounter(_ context.Context, name string, value int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -44,6 +50,7 @@ func (s *MemStorage) UpdateCounter(_ context.Context, name string, value int64) 
 	return nil
 }
 
+// UpdateBatch applies a slice of mixed gauge/counter updates atomically.
 func (s *MemStorage) UpdateBatch(_ context.Context, metrics []model.Metrics) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -63,6 +70,7 @@ func (s *MemStorage) UpdateBatch(_ context.Context, metrics []model.Metrics) err
 	return nil
 }
 
+// GetMetric returns the metric and true, or nil and false if it is absent.
 func (s *MemStorage) GetMetric(_ context.Context, name string, mType string) (*model.Metrics, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -80,6 +88,7 @@ func (s *MemStorage) GetMetric(_ context.Context, name string, mType string) (*m
 	return nil, false
 }
 
+// GetValue returns the metric value formatted as text and true, or "" and false if it is absent.
 func (s *MemStorage) GetValue(_ context.Context, mType string, name string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -97,6 +106,7 @@ func (s *MemStorage) GetValue(_ context.Context, mType string, name string) (str
 	return "", false
 }
 
+// GetAllMetrics returns every metric formatted as "<type>/<name>" → value.
 func (s *MemStorage) GetAllMetrics(_ context.Context) map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -111,6 +121,7 @@ func (s *MemStorage) GetAllMetrics(_ context.Context) map[string]string {
 	return result
 }
 
+// Snapshot returns a typed copy of all metrics, suitable for serialization.
 func (s *MemStorage) Snapshot() []model.Metrics {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

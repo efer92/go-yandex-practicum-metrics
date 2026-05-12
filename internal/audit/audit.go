@@ -7,21 +7,25 @@ import (
 	"go.uber.org/zap"
 )
 
+// Event is a single audit record: a unix timestamp, the metric names handled, and the client IP.
 type Event struct {
 	TS        int64    `json:"ts"`
 	Metrics   []string `json:"metrics"`
 	IPAddress string   `json:"ip_address"`
 }
 
+// Sink is the observer side of the audit pattern — a destination that receives Events.
 type Sink interface {
 	Receive(ctx context.Context, e Event) error
 }
 
+// Publisher fans an Event out to every registered Sink, logging per-sink errors.
 type Publisher struct {
 	sinks  []Sink
 	logger *zap.Logger
 }
 
+// NewPublisher returns a Publisher wired to the given sinks.
 func NewPublisher(logger *zap.Logger, sinks ...Sink) *Publisher {
 	return &Publisher{sinks: sinks, logger: logger}
 }

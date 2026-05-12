@@ -35,8 +35,8 @@ func (w *hashResponseWriter) flush(key string) {
 	w.ResponseWriter.Write(body) //nolint:errcheck
 }
 
-// HashMiddleware возвращает nil если ключ не задан — middleware не подключается вовсе.
-// При наличии ключа проверяет подпись входящего запроса и подписывает ответ.
+// HashMiddleware verifies the HashSHA256 header on incoming requests and signs responses.
+// Returns nil when key is empty so the middleware can be skipped entirely.
 func HashMiddleware(key string, logger *zap.Logger) func(http.Handler) http.Handler {
 	if key == "" {
 		return nil

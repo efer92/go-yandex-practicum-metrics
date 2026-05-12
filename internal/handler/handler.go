@@ -1,3 +1,6 @@
+// Package handler implements the HTTP endpoints of the metrics server:
+// text/plain and JSON metric updates, value lookups, batch updates,
+// an HTML dashboard, and an optional /ping for the database backend.
 package handler
 
 import (
@@ -18,11 +21,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// Pinger — опциональная проверка соединения с БД.
+// Pinger is the optional database-connection check used by the /ping endpoint.
 type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
+// MetricHandler exposes the metric HTTP endpoints on top of a MetricService.
 type MetricHandler struct {
 	svc       *service.MetricService
 	log       *zap.Logger
@@ -30,6 +34,7 @@ type MetricHandler struct {
 	publisher *audit.Publisher
 }
 
+// NewMetricHandler returns a MetricHandler. The pinger and publisher are optional and may be nil.
 func NewMetricHandler(svc *service.MetricService, log *zap.Logger, pinger Pinger, publisher *audit.Publisher) *MetricHandler {
 	return &MetricHandler{svc: svc, log: log, pinger: pinger, publisher: publisher}
 }
@@ -60,6 +65,7 @@ func (h *MetricHandler) emitAudit(r *http.Request, metrics []string) {
 	})
 }
 
+// Routes returns a chi.Router with all metric endpoints mounted.
 func (h *MetricHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
@@ -78,13 +84,13 @@ func (h *MetricHandler) Routes() chi.Router {
 	return r
 }
 
-// internalError логирует 5xx ошибку и отвечает клиенту безопасным текстом.
+// internalError logs the 5xx error and responds with a safe generic message.
 func (h *MetricHandler) internalError(w http.ResponseWriter, msg string, err error) {
 	h.log.Error(msg, zap.Error(err))
 	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 }
 
-// httpStatusForError возвращает HTTP-статус по типу ошибки сервиса.
+// httpStatusForError maps a service-level error to an HTTP status code.
 func httpStatusForError(err error) int {
 	switch {
 	case errors.Is(err, service.ErrMetricNotFound):
@@ -99,7 +105,8 @@ func httpStatusForError(err error) int {
 	}
 }
 
-// Ping — GET /ping — проверяет соединение с БД.
+// Ping handles GET /ping and verifies the database connection.
+// Responds 500 when the database backend is not configured or unreachable.
 func (h *MetricHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	if h.pinger == nil {
 		http.Error(w, "database not configured", http.StatusInternalServerError)
@@ -114,6 +121,7 @@ func (h *MetricHandler) Ping(w http.ResponseWriter, r *http.Request) {
 
 // ─── text/plain эндпоинты ────────────────────────────────────────────────────
 
+// UpdateMetric handles POST /update/{type}/{name}/{value} for text/plain clients.
 func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
 	mType := chi.URLParam(r, "type")
 	name := chi.URLParam(r, "name")
@@ -133,6 +141,7 @@ func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// GetValue handles GET /value/{type}/{name} and returns the metric value as text.
 func (h *MetricHandler) GetValue(w http.ResponseWriter, r *http.Request) {
 	mType := chi.URLParam(r, "type")
 	name := chi.URLParam(r, "name")
@@ -155,6 +164,8 @@ func (h *MetricHandler) GetValue(w http.ResponseWriter, r *http.Request) {
 
 // ─── JSON эндпоинты ──────────────────────────────────────────────────────────
 
+// UpdateMetricJSON handles POST /update with a JSON-encoded model.Metrics body
+// and responds with the updated metric as JSON.
 func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	var m model.Metrics
 
@@ -188,6 +199,8 @@ func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// GetValueJSON handles POST /value with a JSON-encoded model.Metrics descriptor
+// (only ID and MType are read) and responds with the full metric as JSON.
 func (h *MetricHandler) GetValueJSON(w http.ResponseWriter, r *http.Request) {
 	var req model.Metrics
 
@@ -214,6 +227,8 @@ func (h *MetricHandler) GetValueJSON(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// UpdateMetricsBatch handles POST /updates/ with a JSON-encoded []model.Metrics
+// and applies all updates atomically.
 func (h *MetricHandler) UpdateMetricsBatch(w http.ResponseWriter, r *http.Request) {
 	var metrics []model.Metrics
 
@@ -243,6 +258,7 @@ func (h *MetricHandler) UpdateMetricsBatch(w http.ResponseWriter, r *http.Reques
 
 // ─── HTML dashboard ──────────────────────────────────────────────────────────
 
+// MetricView is the row model used to render the HTML dashboard.
 type MetricView struct {
 	Type  string
 	Name  string
@@ -368,6 +384,7 @@ const htmlTemplate = `
 </html>
 `
 
+// ListMetrics handles GET / and renders an HTML dashboard of all known metrics.
 func (h *MetricHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
 	metrics := h.svc.GetAllMetrics(r.Context())
 

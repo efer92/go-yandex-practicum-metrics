@@ -7,6 +7,7 @@ import (
 	"strconv"
 )
 
+// AgentConfig holds runtime parameters for cmd/agent.
 type AgentConfig struct {
 	Addr           string
 	PollInterval   int
@@ -15,6 +16,7 @@ type AgentConfig struct {
 	RateLimit      int
 }
 
+// ParseAgentConfig reads flags from args, then overlays the corresponding environment variables.
 func ParseAgentConfig(args []string) (AgentConfig, error) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 

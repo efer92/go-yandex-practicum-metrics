@@ -9,11 +9,13 @@ import (
 	"time"
 )
 
+// HTTPSink is an audit Sink that POSTs each Event as JSON to a remote URL.
 type HTTPSink struct {
 	url    string
 	client *http.Client
 }
 
+// NewHTTPSink returns an HTTPSink targeted at url with a 5-second client timeout.
 func NewHTTPSink(url string) *HTTPSink {
 	return &HTTPSink{
 		url:    url,
@@ -21,6 +23,8 @@ func NewHTTPSink(url string) *HTTPSink {
 	}
 }
 
+// Receive POSTs the JSON-encoded Event to the configured URL.
+// Any non-2xx response is treated as an error.
 func (s *HTTPSink) Receive(ctx context.Context, e Event) error {
 	data, err := json.Marshal(e)
 	if err != nil {

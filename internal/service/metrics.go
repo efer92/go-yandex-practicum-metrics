@@ -1,3 +1,5 @@
+// Package service implements the business logic for metric updates and queries
+// on top of a repository.Storage backend.
 package service
 
 import (
@@ -9,15 +11,18 @@ import (
 	"github.com/efer92/go-yandex-practicum-metrics/internal/repository"
 )
 
+// MetricService coordinates metric updates against a Storage and invokes an optional onUpdate callback.
 type MetricService struct {
 	storage  repository.Storage
 	onUpdate func()
 }
 
+// NewMetricService returns a MetricService backed by the given Storage.
 func NewMetricService(storage repository.Storage) *MetricService {
 	return &MetricService{storage: storage}
 }
 
+// SetOnUpdate registers a callback invoked after every successful update.
 func (s *MetricService) SetOnUpdate(fn func()) {
 	s.onUpdate = fn
 }
@@ -28,6 +33,7 @@ func (s *MetricService) notifyUpdate() {
 	}
 }
 
+// UpdateMetric parses the textual value and applies the update.
 func (s *MetricService) UpdateMetric(ctx context.Context, mType, name, value string) error {
 	switch mType {
 	case model.Gauge:
@@ -53,6 +59,7 @@ func (s *MetricService) UpdateMetric(ctx context.Context, mType, name, value str
 	return nil
 }
 
+// UpdateMetricFromModel applies a single update encoded as a model.Metrics value.
 func (s *MetricService) UpdateMetricFromModel(ctx context.Context, m model.Metrics) error {
 	switch m.MType {
 	case model.Gauge:
@@ -76,6 +83,7 @@ func (s *MetricService) UpdateMetricFromModel(ctx context.Context, m model.Metri
 	return nil
 }
 
+// UpdateBatch applies a slice of updates and invokes onUpdate once on success.
 func (s *MetricService) UpdateBatch(ctx context.Context, metrics []model.Metrics) error {
 	if len(metrics) == 0 {
 		return nil
@@ -87,6 +95,7 @@ func (s *MetricService) UpdateBatch(ctx context.Context, metrics []model.Metrics
 	return nil
 }
 
+// GetMetric returns the metric or one of ErrMetricNameEmpty/ErrUnknownType/ErrMetricNotFound.
 func (s *MetricService) GetMetric(ctx context.Context, mType, name string) (*model.Metrics, error) {
 	if name == "" {
 		return nil, ErrMetricNameEmpty
@@ -101,6 +110,7 @@ func (s *MetricService) GetMetric(ctx context.Context, mType, name string) (*mod
 	return m, nil
 }
 
+// GetValue returns the metric value formatted as text, or one of the same errors as GetMetric.
 func (s *MetricService) GetValue(ctx context.Context, mType, name string) (string, error) {
 	if name == "" {
 		return "", ErrMetricNameEmpty
@@ -114,6 +124,7 @@ func (s *MetricService) GetValue(ctx context.Context, mType, name string) (strin
 	return "", ErrMetricNotFound
 }
 
+// GetAllMetrics returns every metric formatted as "<type>/<name>" → value.
 func (s *MetricService) GetAllMetrics(ctx context.Context) map[string]string {
 	return s.storage.GetAllMetrics(ctx)
 }
