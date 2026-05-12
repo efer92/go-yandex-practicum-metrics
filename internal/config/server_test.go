@@ -63,3 +63,30 @@ func TestParseServerConfig_InvalidRestore(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "RESTORE")
 }
+
+func TestParseServerConfig_AuditDefaultsEmpty(t *testing.T) {
+	cfg, err := ParseServerConfig([]string{})
+	require.NoError(t, err)
+
+	assert.Equal(t, "", cfg.AuditFile)
+	assert.Equal(t, "", cfg.AuditURL)
+}
+
+func TestParseServerConfig_AuditFlags(t *testing.T) {
+	cfg, err := ParseServerConfig([]string{"--audit-file", "/tmp/a.log", "--audit-url", "http://example.com/audit"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "/tmp/a.log", cfg.AuditFile)
+	assert.Equal(t, "http://example.com/audit", cfg.AuditURL)
+}
+
+func TestParseServerConfig_AuditEnvOverridesFlags(t *testing.T) {
+	t.Setenv("AUDIT_FILE", "/var/log/env.log")
+	t.Setenv("AUDIT_URL", "http://env.example.com/audit")
+
+	cfg, err := ParseServerConfig([]string{"--audit-file", "/tmp/flag.log", "--audit-url", "http://flag.example.com/audit"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "/var/log/env.log", cfg.AuditFile)
+	assert.Equal(t, "http://env.example.com/audit", cfg.AuditURL)
+}

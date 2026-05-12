@@ -14,6 +14,8 @@ type ServerConfig struct {
 	Restore         bool
 	DatabaseDSN     string
 	Key             string
+	AuditFile       string
+	AuditURL        string
 }
 
 func ParseServerConfig(args []string) (ServerConfig, error) {
@@ -26,6 +28,8 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs.BoolVar(&cfg.Restore, "r", true, "Restore metrics from file on start")
 	fs.StringVar(&cfg.DatabaseDSN, "d", "", "PostgreSQL DSN")
 	fs.StringVar(&cfg.Key, "k", "", "Signing key for HMAC-SHA256")
+	fs.StringVar(&cfg.AuditFile, "audit-file", "", "Audit log file path (audit disabled if empty)")
+	fs.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log HTTP sink URL (audit disabled if empty)")
 	fs.Parse(args)
 
 	if env, ok := os.LookupEnv("ADDRESS"); ok {
@@ -53,6 +57,12 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	}
 	if env, ok := os.LookupEnv("KEY"); ok {
 		cfg.Key = env
+	}
+	if env, ok := os.LookupEnv("AUDIT_FILE"); ok {
+		cfg.AuditFile = env
+	}
+	if env, ok := os.LookupEnv("AUDIT_URL"); ok {
+		cfg.AuditURL = env
 	}
 
 	return cfg, nil

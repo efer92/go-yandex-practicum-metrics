@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/efer92/go-yandex-practicum-metrics/internal/audit"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/config"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/handler"
 	custommiddleware "github.com/efer92/go-yandex-practicum-metrics/internal/middleware"
@@ -21,8 +22,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pinger, key string) http.Handler {
-	h := handler.NewMetricHandler(svc, logger, pinger)
+func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pinger, key string, publisher *audit.Publisher) http.Handler {
+	h := handler.NewMetricHandler(svc, logger, pinger, publisher)
 
 	r := chi.NewRouter()
 	r.Use(custommiddleware.Logger(logger))
@@ -34,6 +35,21 @@ func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pi
 	r.Mount("/", h.Routes())
 
 	return r
+}
+
+// buildAuditPublisher returns nil when no audit sink is configured; Notify handles nil.
+func buildAuditPublisher(cfg config.ServerConfig, logger *zap.Logger) *audit.Publisher {
+	var sinks []audit.Sink
+	if cfg.AuditFile != "" {
+		sinks = append(sinks, audit.NewFileSink(cfg.AuditFile))
+	}
+	if cfg.AuditURL != "" {
+		sinks = append(sinks, audit.NewHTTPSink(cfg.AuditURL))
+	}
+	if len(sinks) == 0 {
+		return nil
+	}
+	return audit.NewPublisher(logger, sinks...)
 }
 
 func main() {
@@ -101,9 +117,11 @@ func main() {
 		pinger = dbSt
 	}
 
+	publisher := buildAuditPublisher(cfg, logger)
+
 	srv := &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      newRouter(svc, logger, pinger, cfg.Key),
+		Handler:      newRouter(svc, logger, pinger, cfg.Key, publisher),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -115,6 +133,8 @@ func main() {
 		zap.Int("store_interval", cfg.StoreInterval),
 		zap.String("file_storage_path", cfg.FileStoragePath),
 		zap.Bool("restore", cfg.Restore),
+		zap.String("audit_file", cfg.AuditFile),
+		zap.String("audit_url", cfg.AuditURL),
 	)
 
 	g.Go(func() error {

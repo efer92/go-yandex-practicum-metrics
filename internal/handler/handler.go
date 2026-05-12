@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"html/template"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/efer92/go-yandex-practicum-metrics/internal/audit"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -21,13 +24,40 @@ type Pinger interface {
 }
 
 type MetricHandler struct {
-	svc    *service.MetricService
-	log    *zap.Logger
-	pinger Pinger
+	svc       *service.MetricService
+	log       *zap.Logger
+	pinger    Pinger
+	publisher *audit.Publisher
 }
 
-func NewMetricHandler(svc *service.MetricService, log *zap.Logger, pinger Pinger) *MetricHandler {
-	return &MetricHandler{svc: svc, log: log, pinger: pinger}
+func NewMetricHandler(svc *service.MetricService, log *zap.Logger, pinger Pinger, publisher *audit.Publisher) *MetricHandler {
+	return &MetricHandler{svc: svc, log: log, pinger: pinger, publisher: publisher}
+}
+
+// clientIP returns X-Real-IP, the first X-Forwarded-For entry, or the host from RemoteAddr.
+func clientIP(r *http.Request) string {
+	if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
+		return ip
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i >= 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func (h *MetricHandler) emitAudit(r *http.Request, metrics []string) {
+	h.publisher.Notify(r.Context(), audit.Event{
+		TS:        time.Now().Unix(),
+		Metrics:   metrics,
+		IPAddress: clientIP(r),
+	})
 }
 
 func (h *MetricHandler) Routes() chi.Router {
@@ -99,6 +129,7 @@ func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.emitAudit(r, []string{name})
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -147,6 +178,8 @@ func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request)
 		h.internalError(w, "failed to get metric after update", err)
 		return
 	}
+
+	h.emitAudit(r, []string{m.ID})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -198,6 +231,12 @@ func (h *MetricHandler) UpdateMetricsBatch(w http.ResponseWriter, r *http.Reques
 		h.internalError(w, "batch update failed", err)
 		return
 	}
+
+	names := make([]string, 0, len(metrics))
+	for _, m := range metrics {
+		names = append(names, m.ID)
+	}
+	h.emitAudit(r, names)
 
 	w.WriteHeader(http.StatusOK)
 }
