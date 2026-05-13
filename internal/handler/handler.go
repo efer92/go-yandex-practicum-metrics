@@ -57,8 +57,8 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// emitAudit dispatches the audit event asynchronously so that slow observers
-// (e.g. a stalled remote audit sink) cannot block the response. The request
+// emitAudit dispatches the audit event asynchronously so that a slow observer
+// (e.g. a stalled remote audit endpoint) cannot block the response. The request
 // context is intentionally not propagated — it is cancelled the moment the
 // response is sent, which would abort an in-flight HTTP audit POST.
 func (h *MetricHandler) emitAudit(r *http.Request, metrics []string) {

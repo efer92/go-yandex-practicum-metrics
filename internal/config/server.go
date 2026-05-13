@@ -32,7 +32,7 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs.StringVar(&cfg.DatabaseDSN, "d", "", "PostgreSQL DSN")
 	fs.StringVar(&cfg.Key, "k", "", "Signing key for HMAC-SHA256")
 	fs.StringVar(&cfg.AuditFile, "audit-file", "", "Audit log file path (audit disabled if empty)")
-	fs.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log HTTP sink URL (audit disabled if empty)")
+	fs.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log HTTP observer URL (audit disabled if empty)")
 	fs.Parse(args)
 
 	if env, ok := os.LookupEnv("ADDRESS"); ok {
