@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -41,7 +42,11 @@ func (o *HTTPObserver) Receive(ctx context.Context, e Event) error {
 	if err != nil {
 		return fmt.Errorf("audit: post %q: %w", o.url, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Drain the body so net/http can return the connection to the keep-alive pool.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("audit: unexpected status %d from %q", resp.StatusCode, o.url)
