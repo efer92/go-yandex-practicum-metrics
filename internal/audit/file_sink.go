@@ -8,35 +8,41 @@ import (
 	"sync"
 )
 
-// FileSink is an audit Sink that appends each Event as a JSON line to a file.
-type FileSink struct {
-	mu   sync.Mutex
-	path string
+// FileObserver is an audit Observer that appends each Event as a JSON line to a file.
+// The file handle is opened once in the constructor and reused for every write.
+type FileObserver struct {
+	mu sync.Mutex
+	f  *os.File
 }
 
-// NewFileSink returns a FileSink that writes to path.
-func NewFileSink(path string) *FileSink {
-	return &FileSink{path: path}
+// NewFileObserver opens (or creates) path in append mode and returns a FileObserver.
+func NewFileObserver(path string) (*FileObserver, error) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("audit: open %q: %w", path, err)
+	}
+	return &FileObserver{f: f}, nil
 }
 
 // Receive serializes e to JSON and appends it as a new line to the file.
-func (s *FileSink) Receive(_ context.Context, e Event) error {
+func (o *FileObserver) Receive(_ context.Context, e Event) error {
 	data, err := json.Marshal(e)
 	if err != nil {
 		return fmt.Errorf("audit: marshal event: %w", err)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	o.mu.Lock()
+	defer o.mu.Unlock()
 
-	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("audit: open %q: %w", s.path, err)
-	}
-	defer f.Close()
-
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		return fmt.Errorf("audit: write %q: %w", s.path, err)
+	if _, err := o.f.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("audit: write %q: %w", o.f.Name(), err)
 	}
 	return nil
+}
+
+// Close releases the underlying file handle.
+func (o *FileObserver) Close() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.f.Close()
 }

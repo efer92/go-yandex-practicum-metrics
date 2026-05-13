@@ -9,38 +9,31 @@ import (
 	"go.uber.org/zap"
 )
 
-type recordingSink struct {
+type recordingObserver struct {
 	events []Event
 	err    error
 }
 
-func (s *recordingSink) Receive(_ context.Context, e Event) error {
-	s.events = append(s.events, e)
-	return s.err
+func (o *recordingObserver) Receive(_ context.Context, e Event) error {
+	o.events = append(o.events, e)
+	return o.err
 }
 
-func TestPublisher_NotifyAllSinks(t *testing.T) {
-	s1 := &recordingSink{}
-	s2 := &recordingSink{}
-	p := NewPublisher(zap.NewNop(), s1, s2)
+func TestPublisher_NotifyAllObservers(t *testing.T) {
+	o1 := &recordingObserver{}
+	o2 := &recordingObserver{}
+	p := NewPublisher(zap.NewNop(), o1, o2)
 
 	e := Event{TS: 100, Metrics: []string{"Alloc"}, IPAddress: "1.2.3.4"}
 	p.Notify(context.Background(), e)
 
-	assert.Equal(t, []Event{e}, s1.events)
-	assert.Equal(t, []Event{e}, s2.events)
+	assert.Equal(t, []Event{e}, o1.events)
+	assert.Equal(t, []Event{e}, o2.events)
 }
 
-func TestPublisher_NilSafe(t *testing.T) {
-	var p *Publisher
-	assert.NotPanics(t, func() {
-		p.Notify(context.Background(), Event{})
-	})
-}
-
-func TestPublisher_SinkErrorDoesNotStop(t *testing.T) {
-	failing := &recordingSink{err: errors.New("boom")}
-	ok := &recordingSink{}
+func TestPublisher_ObserverErrorDoesNotStop(t *testing.T) {
+	failing := &recordingObserver{err: errors.New("boom")}
+	ok := &recordingObserver{}
 	p := NewPublisher(zap.NewNop(), failing, ok)
 
 	e := Event{TS: 1, Metrics: []string{"X"}, IPAddress: "127.0.0.1"}

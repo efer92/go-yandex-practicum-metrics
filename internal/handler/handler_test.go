@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/audit"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
@@ -272,26 +274,43 @@ func TestGetValue_TextPlain(t *testing.T) {
 
 // ─── audit ───────────────────────────────────────────────────────────────────
 
-type recordingSink struct {
+type recordingObserver struct {
+	mu     sync.Mutex
 	events []audit.Event
 }
 
-func (s *recordingSink) Receive(_ context.Context, e audit.Event) error {
-	s.events = append(s.events, e)
+func (o *recordingObserver) Receive(_ context.Context, e audit.Event) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.events = append(o.events, e)
 	return nil
 }
 
-func newHandlerWithSink(t *testing.T) (*MetricHandler, *recordingSink) {
+func (o *recordingObserver) snapshot() []audit.Event {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]audit.Event(nil), o.events...)
+}
+
+func newHandlerWithObserver(t *testing.T) (*MetricHandler, *recordingObserver) {
 	t.Helper()
 	storage := repository.NewMemStorage()
 	svc := service.NewMetricService(storage)
-	sink := &recordingSink{}
-	pub := audit.NewPublisher(zap.NewNop(), sink)
-	return NewMetricHandler(svc, zap.NewNop(), nil, pub), sink
+	obs := &recordingObserver{}
+	pub := audit.NewPublisher(zap.NewNop(), obs)
+	return NewMetricHandler(svc, zap.NewNop(), nil, pub), obs
+}
+
+func waitForEvents(t *testing.T, obs *recordingObserver, n int) []audit.Event {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return len(obs.snapshot()) >= n
+	}, time.Second, time.Millisecond, "audit event not delivered")
+	return obs.snapshot()
 }
 
 func TestUpdateMetricJSON_AuditEmits(t *testing.T) {
-	h, sink := newHandlerWithSink(t)
+	h, obs := newHandlerWithObserver(t)
 	srv := newTestServer(h)
 	defer srv.Close()
 
@@ -301,14 +320,15 @@ func TestUpdateMetricJSON_AuditEmits(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 
-	require.Len(t, sink.events, 1)
-	assert.Equal(t, []string{"Alloc"}, sink.events[0].Metrics)
-	assert.NotEmpty(t, sink.events[0].IPAddress)
-	assert.NotZero(t, sink.events[0].TS)
+	events := waitForEvents(t, obs, 1)
+	require.Len(t, events, 1)
+	assert.Equal(t, []string{"Alloc"}, events[0].Metrics)
+	assert.NotEmpty(t, events[0].IPAddress)
+	assert.NotZero(t, events[0].TS)
 }
 
 func TestUpdateMetricsBatch_AuditEmitsAllNames(t *testing.T) {
-	h, sink := newHandlerWithSink(t)
+	h, obs := newHandlerWithObserver(t)
 	srv := newTestServer(h)
 	defer srv.Close()
 
@@ -322,12 +342,13 @@ func TestUpdateMetricsBatch_AuditEmitsAllNames(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 
-	require.Len(t, sink.events, 1)
-	assert.Equal(t, []string{"Alloc", "PollCount"}, sink.events[0].Metrics)
+	events := waitForEvents(t, obs, 1)
+	require.Len(t, events, 1)
+	assert.Equal(t, []string{"Alloc", "PollCount"}, events[0].Metrics)
 }
 
 func TestUpdateMetric_TextPlain_AuditEmits(t *testing.T) {
-	h, sink := newHandlerWithSink(t)
+	h, obs := newHandlerWithObserver(t)
 	srv := newTestServer(h)
 	defer srv.Close()
 
@@ -335,12 +356,13 @@ func TestUpdateMetric_TextPlain_AuditEmits(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 
-	require.Len(t, sink.events, 1)
-	assert.Equal(t, []string{"Alloc"}, sink.events[0].Metrics)
+	events := waitForEvents(t, obs, 1)
+	require.Len(t, events, 1)
+	assert.Equal(t, []string{"Alloc"}, events[0].Metrics)
 }
 
 func TestUpdateMetricJSON_AuditNotEmittedOnError(t *testing.T) {
-	h, sink := newHandlerWithSink(t)
+	h, obs := newHandlerWithObserver(t)
 	srv := newTestServer(h)
 	defer srv.Close()
 
@@ -349,5 +371,7 @@ func TestUpdateMetricJSON_AuditNotEmittedOnError(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 
-	assert.Empty(t, sink.events)
+	// give any potential audit goroutine a moment; observer must remain empty.
+	time.Sleep(20 * time.Millisecond)
+	assert.Empty(t, obs.snapshot())
 }
