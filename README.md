@@ -440,6 +440,52 @@ CPUutilization1 (точное количество — по числу CPU, оп
 Для файла-приёмника добавление происходит в конец файла, указанного в параметре конфигурации, на новой строке.
 Для удалённого сервера-приёмника отсылка выполняется методом POST по URL, указанному в параметре конфигурации.
 
+## Инкремент 17
+
+Добавлены бенчмарки в `internal/handler/handler_bench_test.go` и `internal/repository/storage_bench_test.go`. Профили памяти сняты при `-benchtime=5000x` на `BenchmarkHandler_*` и сохранены в `profiles/`.
+
+Оптимизации:
+
+- `ListMetrics` (`handler.go`): убран `strings.SplitN`, используется `strings.IndexByte` без аллокаций; слайс `[]MetricView` предаллоцируется по `len(metrics)`.
+- `MemStorage.GetAllMetrics` (`repository/storage.go`): map создаётся с известной capacity `len(gauges)+len(counters)`.
+
+Снятие профилей:
+
+```bash
+go test -bench=BenchmarkHandler -benchtime=5000x -benchmem -memprofile=profiles/base.pprof   -run=^$ ./internal/handler/   # до оптимизаций
+go test -bench=BenchmarkHandler -benchtime=5000x -benchmem -memprofile=profiles/result.pprof -run=^$ ./internal/handler/   # после оптимизаций
+go tool pprof -top -diff_base=profiles/base.pprof profiles/result.pprof
+```
+
+Сокращение использования памяти подтверждается отрицательными значениями в `pprof -top -diff_base`:
+
+```bash
+File: handler.test
+Type: alloc_space
+Showing nodes accounting for -281272.86kB, 12.44% of 2261579.61kB total
+Dropped 94 nodes (cum <= 11307.90kB)
+      flat  flat%   sum%        cum   cum%
+-112857.27kB  4.99%  4.99% -286933.81kB 12.69%  internal/handler.(*MetricHandler).ListMetrics
+-34305.04kB  1.52%  6.51% -34305.04kB  1.52%   strings.genSplit
+-31053.20kB  1.37%  7.88% -31053.20kB  1.37%   bytes.growSlice
+-25641.66kB  1.13%  9.01% -25641.66kB  1.13%   internal/repository.(*MemStorage).GetAllMetrics
+-19499.02kB  0.86%  9.88% -19499.02kB  0.86%   text/template/parse.(*Tree).newText (inline)
+-15924.37kB   0.7% 10.58% -15924.37kB   0.7%   bytes.Map
+-11274.35kB   0.5% 10.44% -11274.35kB   0.5%   text/template.addValueFuncs
+-9737.14kB  0.43% 10.88%  -9737.14kB  0.43%   text/template.addFuncs (inline)
+-8713.57kB  0.39% 11.26%  -8713.57kB  0.39%   text/template.builtins (inline)
+-7682.34kB  0.34% 11.26%  -7682.34kB  0.34%   net/http.(*Request).WithContext (inline)
+-5632.26kB  0.25% 10.90%  -5632.26kB  0.25%   html/template.makeEscaper (inline)
+-4609.10kB   0.2% 11.03%  -4609.10kB   0.2%   net/http.Header.Clone (inline)
+...
+         0     0% 12.44% -288471.37kB 12.76%  internal/handler.BenchmarkHandler_ListMetrics
+         0     0% 12.44%  -25641.66kB  1.13%  internal/service.(*MetricService).GetAllMetrics (inline)
+         0     0% 12.44%  -45109.86kB  1.99%  html/template.(*Template).Parse
+         0     0% 12.44%  -33793.03kB  1.49%  strings.SplitN (inline)
+```
+
+Итог: общий объём аллокаций сокращён на ~12% при идентичной нагрузке (5000 итераций), `ListMetrics` сам по себе — на ~12.7% от своего вклада.
+
 # Начало работы
 
 Выполните:
