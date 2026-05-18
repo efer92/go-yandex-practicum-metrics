@@ -121,4 +121,3 @@ func TestFileBackedStorage_Close(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "5", val)
 }
-
