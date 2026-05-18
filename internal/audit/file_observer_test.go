@@ -12,14 +12,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFileSink_AppendsJSONLine(t *testing.T) {
+func TestFileObserver_AppendsJSONLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink := NewFileSink(path)
+	obs, err := NewFileObserver(path)
+	require.NoError(t, err)
+	defer obs.Close()
 
 	ctx := context.Background()
-	require.NoError(t, sink.Receive(ctx, Event{TS: 1, Metrics: []string{"A"}, IPAddress: "10.0.0.1"}))
-	require.NoError(t, sink.Receive(ctx, Event{TS: 2, Metrics: []string{"B", "C"}, IPAddress: "10.0.0.2"}))
+	require.NoError(t, obs.Receive(ctx, Event{TS: 1, Metrics: []string{"A"}, IPAddress: "10.0.0.1"}))
+	require.NoError(t, obs.Receive(ctx, Event{TS: 2, Metrics: []string{"B", "C"}, IPAddress: "10.0.0.2"}))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -35,13 +37,15 @@ func TestFileSink_AppendsJSONLine(t *testing.T) {
 	assert.Equal(t, Event{TS: 2, Metrics: []string{"B", "C"}, IPAddress: "10.0.0.2"}, e2)
 }
 
-func TestFileSink_AppendsToExistingFile(t *testing.T) {
+func TestFileObserver_AppendsToExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
 	require.NoError(t, os.WriteFile(path, []byte("pre-existing\n"), 0644))
 
-	sink := NewFileSink(path)
-	require.NoError(t, sink.Receive(context.Background(), Event{TS: 7, Metrics: []string{"M"}, IPAddress: "127.0.0.1"}))
+	obs, err := NewFileObserver(path)
+	require.NoError(t, err)
+	defer obs.Close()
+	require.NoError(t, obs.Receive(context.Background(), Event{TS: 7, Metrics: []string{"M"}, IPAddress: "127.0.0.1"}))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)

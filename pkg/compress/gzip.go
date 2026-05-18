@@ -1,3 +1,4 @@
+// Package compress provides gzip helpers used by the agent's HTTP client.
 package compress
 
 import (
@@ -6,8 +7,7 @@ import (
 	"fmt"
 )
 
-// GzipData сжимает данные и возвращает буфер с результатом.
-// Используется агентом при отправке запросов на сервер.
+// GzipData compresses data with gzip.BestSpeed and returns the resulting buffer.
 func GzipData(data []byte) (*bytes.Buffer, error) {
 	var buf bytes.Buffer
 	gz, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)

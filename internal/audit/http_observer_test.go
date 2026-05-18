@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHTTPSink_PostsJSON(t *testing.T) {
+func TestHTTPObserver_PostsJSON(t *testing.T) {
 	var received Event
 	var receivedCT string
 	var receivedMethod string
@@ -27,23 +27,23 @@ func TestHTTPSink_PostsJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	sink := NewHTTPSink(srv.URL)
+	obs := NewHTTPObserver(srv.URL)
 	e := Event{TS: 42, Metrics: []string{"Alloc", "Frees"}, IPAddress: "192.168.0.42"}
-	require.NoError(t, sink.Receive(context.Background(), e))
+	require.NoError(t, obs.Receive(context.Background(), e))
 
 	assert.Equal(t, http.MethodPost, receivedMethod)
 	assert.Equal(t, "application/json", receivedCT)
 	assert.Equal(t, e, received)
 }
 
-func TestHTTPSink_NonOKReturnsError(t *testing.T) {
+func TestHTTPObserver_NonOKReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
 
-	sink := NewHTTPSink(srv.URL)
-	err := sink.Receive(context.Background(), Event{TS: 1, Metrics: []string{"X"}, IPAddress: "127.0.0.1"})
+	obs := NewHTTPObserver(srv.URL)
+	err := obs.Receive(context.Background(), Event{TS: 1, Metrics: []string{"X"}, IPAddress: "127.0.0.1"})
 
 	assert.Error(t, err)
 }

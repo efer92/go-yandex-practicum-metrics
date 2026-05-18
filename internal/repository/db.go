@@ -13,10 +13,12 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// DBStorage is a PostgreSQL-backed Storage implementation.
 type DBStorage struct {
 	db *sql.DB
 }
 
+// NewDBStorage opens a PostgreSQL connection, runs migrations, and returns the storage.
 func NewDBStorage(ctx context.Context, dsn string) (*DBStorage, error) {
 	conn, err := db.Connect(ctx, db.DefaultConfig(dsn))
 	if err != nil {
@@ -39,14 +41,17 @@ func isRetriablePgError(err error) bool {
 	return false
 }
 
+// Ping checks that the database connection is alive.
 func (s *DBStorage) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
 
+// Close releases the underlying *sql.DB.
 func (s *DBStorage) Close() error {
 	return s.db.Close()
 }
 
+// UpdateGauge upserts the gauge value in the database with retries on transient errors.
 func (s *DBStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
 	return retry.Do(func() error {
 		_, err := s.db.ExecContext(ctx, `
@@ -58,6 +63,7 @@ func (s *DBStorage) UpdateGauge(ctx context.Context, name string, value float64)
 	}, isRetriablePgError)
 }
 
+// UpdateCounter adds the delta to the existing counter value in the database.
 func (s *DBStorage) UpdateCounter(ctx context.Context, name string, value int64) error {
 	return retry.Do(func() error {
 		_, err := s.db.ExecContext(ctx, `
@@ -69,6 +75,7 @@ func (s *DBStorage) UpdateCounter(ctx context.Context, name string, value int64)
 	}, isRetriablePgError)
 }
 
+// UpdateBatch applies a slice of mixed gauge/counter updates inside a single transaction.
 func (s *DBStorage) UpdateBatch(ctx context.Context, metrics []model.Metrics) error {
 	return retry.Do(func() error {
 		tx, err := s.db.BeginTx(ctx, nil)
@@ -107,6 +114,7 @@ func (s *DBStorage) UpdateBatch(ctx context.Context, metrics []model.Metrics) er
 	}, isRetriablePgError)
 }
 
+// GetMetric returns the metric and true, or nil and false if it is absent.
 func (s *DBStorage) GetMetric(ctx context.Context, name string, mType string) (*model.Metrics, bool) {
 	var result *model.Metrics
 
@@ -140,6 +148,7 @@ func (s *DBStorage) GetMetric(ctx context.Context, name string, mType string) (*
 	return result, true
 }
 
+// GetValue returns the metric value formatted as text and true, or "" and false if it is absent.
 func (s *DBStorage) GetValue(ctx context.Context, mType string, name string) (string, bool) {
 	m, ok := s.GetMetric(ctx, name, mType)
 	if !ok {
@@ -158,6 +167,7 @@ func (s *DBStorage) GetValue(ctx context.Context, mType string, name string) (st
 	return "", false
 }
 
+// GetAllMetrics returns every metric formatted as "<type>/<name>" → value.
 func (s *DBStorage) GetAllMetrics(ctx context.Context) map[string]string {
 	var result map[string]string
 

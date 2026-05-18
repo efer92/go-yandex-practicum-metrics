@@ -1,3 +1,4 @@
+// Package agent collects runtime/system metrics and ships them to a metrics server.
 package agent
 
 import (
@@ -9,6 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Agent owns a Collector and a Sender and coordinates the poll/report loops.
 type Agent struct {
 	collector      *Collector
 	sender         *Sender
@@ -18,7 +20,7 @@ type Agent struct {
 	log            *zap.Logger
 }
 
-// NewWithConfig создаёт агента. Если rateLimit <= 0 — завершает процесс с ошибкой:
+// NewWithConfig builds an Agent. The process is terminated with logger.Fatal when rateLimit <= 0.
 func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration, logger *zap.Logger, key string, rateLimit int) *Agent {
 	if rateLimit <= 0 {
 		logger.Fatal("rateLimit must be > 0", zap.Int("rateLimit", rateLimit))
@@ -33,8 +35,8 @@ func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration,
 	}
 }
 
-// Run запускает агента и блокируется до отмены ctx.
-// Graceful shutdown: ждёт завершения всех горутин перед возвратом.
+// Run starts the agent loops and blocks until ctx is cancelled.
+// All spawned goroutines are awaited before Run returns (graceful shutdown).
 func (a *Agent) Run(ctx context.Context) {
 	jobs := make(chan []model.Metrics, a.rateLimit)
 

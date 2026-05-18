@@ -37,19 +37,23 @@ func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pi
 	return r
 }
 
-// buildAuditPublisher returns nil when no audit sink is configured; Notify handles nil.
-func buildAuditPublisher(cfg config.ServerConfig, logger *zap.Logger) *audit.Publisher {
-	var sinks []audit.Sink
+// buildAuditPublisher returns nil when no audit observer is configured.
+func buildAuditPublisher(cfg config.ServerConfig, logger *zap.Logger) (*audit.Publisher, error) {
+	var observers []audit.Observer
 	if cfg.AuditFile != "" {
-		sinks = append(sinks, audit.NewFileSink(cfg.AuditFile))
+		obs, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			return nil, err
+		}
+		observers = append(observers, obs)
 	}
 	if cfg.AuditURL != "" {
-		sinks = append(sinks, audit.NewHTTPSink(cfg.AuditURL))
+		observers = append(observers, audit.NewHTTPObserver(cfg.AuditURL))
 	}
-	if len(sinks) == 0 {
-		return nil
+	if len(observers) == 0 {
+		return nil, nil
 	}
-	return audit.NewPublisher(logger, sinks...)
+	return audit.NewPublisher(logger, observers...), nil
 }
 
 func main() {
@@ -117,7 +121,17 @@ func main() {
 		pinger = dbSt
 	}
 
-	publisher := buildAuditPublisher(cfg, logger)
+	publisher, err := buildAuditPublisher(cfg, logger)
+	if err != nil {
+		logger.Fatal("failed to init audit publisher", zap.Error(err))
+	}
+	if publisher != nil {
+		defer func() {
+			if err := publisher.Close(); err != nil {
+				logger.Error("audit publisher close failed", zap.Error(err))
+			}
+		}()
+	}
 
 	srv := &http.Server{
 		Addr:         cfg.Addr,

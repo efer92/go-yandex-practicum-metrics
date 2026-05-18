@@ -15,12 +15,14 @@ import (
 
 const headerHashSHA256 = "HashSHA256"
 
+// Sender posts collected metrics to the server, optionally signing them with HMAC-SHA256.
 type Sender struct {
 	serverURL  string
 	httpClient *http.Client
 	key        string
 }
 
+// NewSender returns a Sender targeted at serverURL; key enables HMAC-SHA256 signing when non-empty.
 func NewSender(serverURL string, key string) *Sender {
 	return &Sender{
 		serverURL:  serverURL,
@@ -63,6 +65,7 @@ func (s *Sender) newRequest(url string, body []byte) (*http.Request, error) {
 	return req, nil
 }
 
+// SendMetrics sends each metric in a separate request to /update.
 func (s *Sender) SendMetrics(metrics []model.Metrics) error {
 	return retry.Do(func() error {
 		for _, m := range metrics {
@@ -98,6 +101,7 @@ func (s *Sender) send(m model.Metrics) error {
 	return nil
 }
 
+// SendBatch sends all metrics in a single request to /updates/.
 func (s *Sender) SendBatch(metrics []model.Metrics) error {
 	if len(metrics) == 0 {
 		return nil

@@ -1,3 +1,5 @@
+// Package middleware contains HTTP middleware: structured request logging,
+// gzip compression of request/response bodies, and HMAC-SHA256 signing.
 package middleware
 
 import (
@@ -25,7 +27,7 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// Logger возвращает middleware, логирующий запросы и ответы через zap.
+// Logger returns middleware that logs each request and response through zap.
 func Logger(log *zap.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

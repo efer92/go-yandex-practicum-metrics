@@ -1,3 +1,4 @@
+// Package config parses server and agent configuration from CLI flags and environment variables.
 package config
 
 import (
@@ -7,6 +8,7 @@ import (
 	"strconv"
 )
 
+// ServerConfig holds runtime parameters for cmd/server.
 type ServerConfig struct {
 	Addr            string
 	StoreInterval   int
@@ -18,6 +20,7 @@ type ServerConfig struct {
 	AuditURL        string
 }
 
+// ParseServerConfig reads flags from args, then overlays the corresponding environment variables.
 func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs := flag.NewFlagSet("server", flag.ExitOnError)
 
@@ -29,7 +32,7 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs.StringVar(&cfg.DatabaseDSN, "d", "", "PostgreSQL DSN")
 	fs.StringVar(&cfg.Key, "k", "", "Signing key for HMAC-SHA256")
 	fs.StringVar(&cfg.AuditFile, "audit-file", "", "Audit log file path (audit disabled if empty)")
-	fs.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log HTTP sink URL (audit disabled if empty)")
+	fs.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log HTTP observer URL (audit disabled if empty)")
 	fs.Parse(args)
 
 	if env, ok := os.LookupEnv("ADDRESS"); ok {

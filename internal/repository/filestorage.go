@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// FileBackedStorage — обёртка над MemStorage с поддержкой сохранения на диск.
+// FileBackedStorage wraps MemStorage with snapshot persistence to a JSON file.
 type FileBackedStorage struct {
 	mem    *MemStorage
 	path   string
@@ -19,6 +19,7 @@ type FileBackedStorage struct {
 	logger *zap.Logger
 }
 
+// NewFileBackedStorage returns a FileBackedStorage that persists snapshots to path.
 func NewFileBackedStorage(path string, logger *zap.Logger) *FileBackedStorage {
 	return &FileBackedStorage{
 		mem:    NewMemStorage(),
@@ -27,35 +28,37 @@ func NewFileBackedStorage(path string, logger *zap.Logger) *FileBackedStorage {
 	}
 }
 
-// --- реализация интерфейса Storage (делегируем в MemStorage) ---
-
+// UpdateGauge delegates to the wrapped MemStorage.
 func (s *FileBackedStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
 	return s.mem.UpdateGauge(ctx, name, value)
 }
 
+// UpdateCounter delegates to the wrapped MemStorage.
 func (s *FileBackedStorage) UpdateCounter(ctx context.Context, name string, value int64) error {
 	return s.mem.UpdateCounter(ctx, name, value)
 }
 
+// UpdateBatch delegates to the wrapped MemStorage.
 func (s *FileBackedStorage) UpdateBatch(ctx context.Context, metrics []model.Metrics) error {
 	return s.mem.UpdateBatch(ctx, metrics)
 }
 
+// GetMetric delegates to the wrapped MemStorage.
 func (s *FileBackedStorage) GetMetric(ctx context.Context, name string, mType string) (*model.Metrics, bool) {
 	return s.mem.GetMetric(ctx, name, mType)
 }
 
+// GetValue delegates to the wrapped MemStorage.
 func (s *FileBackedStorage) GetValue(ctx context.Context, mType string, name string) (string, bool) {
 	return s.mem.GetValue(ctx, mType, name)
 }
 
+// GetAllMetrics delegates to the wrapped MemStorage.
 func (s *FileBackedStorage) GetAllMetrics(ctx context.Context) map[string]string {
 	return s.mem.GetAllMetrics(ctx)
 }
 
-// --- файловые операции ---
-
-// Save сохраняет все метрики в JSON-файл.
+// Save writes the current snapshot to the configured JSON file.
 func (s *FileBackedStorage) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -67,7 +70,8 @@ func (s *FileBackedStorage) Save() error {
 	return os.WriteFile(s.path, data, 0644)
 }
 
-// Load загружает метрики из JSON-файла.
+// Load reads a previously saved snapshot from the configured JSON file.
+// A missing file is not an error.
 func (s *FileBackedStorage) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -101,8 +105,7 @@ func (s *FileBackedStorage) Load() error {
 	return nil
 }
 
-// StartPeriodicSave запускает фоновое периодическое сохранение с заданным интервалом.
-// Останавливается когда ctx отменён.
+// StartPeriodicSave spawns a goroutine that calls Save at the given interval until ctx is cancelled.
 func (s *FileBackedStorage) StartPeriodicSave(ctx context.Context, interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -122,15 +125,14 @@ func (s *FileBackedStorage) StartPeriodicSave(ctx context.Context, interval time
 	}()
 }
 
-// SaveOnUpdate — колбэк для service.SetOnUpdate.
-// Логирует ошибку вместо её возврата, т.к. колбэк не возвращает error.
+// SaveOnUpdate is a service.SetOnUpdate-compatible callback that logs errors instead of returning them.
 func (s *FileBackedStorage) SaveOnUpdate() {
 	if err := s.Save(); err != nil {
 		s.logger.Error("sync save failed", zap.Error(err))
 	}
 }
 
-// Close сохраняет метрики при завершении — вызывать при graceful shutdown.
+// Close persists the final snapshot — call from a graceful-shutdown path.
 func (s *FileBackedStorage) Close() error {
 	return s.Save()
 }

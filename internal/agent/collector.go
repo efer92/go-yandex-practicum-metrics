@@ -10,23 +10,26 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
+// Metrics is a single snapshot of agent-side metric state.
 type Metrics struct {
 	Gauge   map[string]float64
 	Counter int64
 }
 
+// Collector accumulates gauge values from runtime/gopsutil and a counter of poll ticks.
 type Collector struct {
 	mu      sync.Mutex
 	metrics Metrics
 }
 
+// NewCollector returns an empty Collector.
 func NewCollector() *Collector {
 	return &Collector{
 		metrics: Metrics{Gauge: make(map[string]float64)},
 	}
 }
 
-// Collect собирает метрики runtime.
+// Collect samples runtime.MemStats, updates the gauges, and increments the poll counter.
 func (c *Collector) Collect() {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
@@ -65,7 +68,7 @@ func (c *Collector) Collect() {
 	c.metrics.Counter++
 }
 
-// CollectExtra собирает дополнительные метрики через gopsutil.
+// CollectExtra samples gopsutil-based memory and CPU metrics.
 func (c *Collector) CollectExtra() error {
 	vmStat, err := mem.VirtualMemory()
 	if err != nil {
@@ -89,7 +92,7 @@ func (c *Collector) CollectExtra() error {
 	return nil
 }
 
-// GetSnapshot возвращает копию текущих метрик.
+// GetSnapshot returns a deep copy of the current metric state.
 func (c *Collector) GetSnapshot() Metrics {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -104,8 +107,8 @@ func (c *Collector) GetSnapshot() Metrics {
 	return snapshot
 }
 
-// AckCounter уменьшает счётчик на delta после успешной отправки метрик на сервер.
-// Если между снапшотом и отправкой пришли новые Collect — их инкремент сохранится.
+// AckCounter subtracts delta from the poll counter after a successful upload,
+// preserving any increments that arrived between snapshot and ack.
 func (c *Collector) AckCounter(delta int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

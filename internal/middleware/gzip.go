@@ -23,8 +23,8 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
-// GzipMiddleware — сжимает ответ если клиент поддерживает gzip,
-// и распаковывает тело запроса если оно сжато.
+// GzipMiddleware decompresses incoming gzip-encoded request bodies and gzip-compresses
+// responses when the client advertises Accept-Encoding: gzip.
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Распаковываем входящий запрос если Content-Encoding: gzip

@@ -2,6 +2,7 @@ package service
 
 import "errors"
 
+// Sentinel errors returned by MetricService for handler-level HTTP status mapping.
 var (
 	ErrMetricNotFound  = errors.New("metric not found")
 	ErrUnknownType     = errors.New("unknown metric type")
