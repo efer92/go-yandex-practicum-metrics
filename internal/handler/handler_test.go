@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/efer92/go-yandex-practicum-metrics/internal/audit"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/repository"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/service"
@@ -20,7 +21,7 @@ import (
 func newTestHandler() *MetricHandler {
 	storage := repository.NewMemStorage()
 	svc := service.NewMetricService(storage)
-	return NewMetricHandler(svc, zap.NewNop(), nil)
+	return NewMetricHandler(svc, zap.NewNop(), nil, nil)
 }
 
 func newTestServer(h *MetricHandler) *httptest.Server {
@@ -56,7 +57,7 @@ func TestPing_NoPinger(t *testing.T) {
 func TestPing_Success(t *testing.T) {
 	storage := repository.NewMemStorage()
 	svc := service.NewMetricService(storage)
-	h := NewMetricHandler(svc, zap.NewNop(), &mockPinger{err: nil})
+	h := NewMetricHandler(svc, zap.NewNop(), &mockPinger{err: nil}, nil)
 	srv := newTestServer(h)
 	defer srv.Close()
 
@@ -70,7 +71,7 @@ func TestPing_Success(t *testing.T) {
 func TestPing_Failure(t *testing.T) {
 	storage := repository.NewMemStorage()
 	svc := service.NewMetricService(storage)
-	h := NewMetricHandler(svc, zap.NewNop(), &mockPinger{err: assert.AnError})
+	h := NewMetricHandler(svc, zap.NewNop(), &mockPinger{err: assert.AnError}, nil)
 	srv := newTestServer(h)
 	defer srv.Close()
 
@@ -267,4 +268,86 @@ func TestGetValue_TextPlain(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// ─── audit ───────────────────────────────────────────────────────────────────
+
+type recordingSink struct {
+	events []audit.Event
+}
+
+func (s *recordingSink) Receive(_ context.Context, e audit.Event) error {
+	s.events = append(s.events, e)
+	return nil
+}
+
+func newHandlerWithSink(t *testing.T) (*MetricHandler, *recordingSink) {
+	t.Helper()
+	storage := repository.NewMemStorage()
+	svc := service.NewMetricService(storage)
+	sink := &recordingSink{}
+	pub := audit.NewPublisher(zap.NewNop(), sink)
+	return NewMetricHandler(svc, zap.NewNop(), nil, pub), sink
+}
+
+func TestUpdateMetricJSON_AuditEmits(t *testing.T) {
+	h, sink := newHandlerWithSink(t)
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	val := 1.5
+	body, _ := json.Marshal(model.Metrics{ID: "Alloc", MType: model.Gauge, Value: &val})
+	resp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	require.Len(t, sink.events, 1)
+	assert.Equal(t, []string{"Alloc"}, sink.events[0].Metrics)
+	assert.NotEmpty(t, sink.events[0].IPAddress)
+	assert.NotZero(t, sink.events[0].TS)
+}
+
+func TestUpdateMetricsBatch_AuditEmitsAllNames(t *testing.T) {
+	h, sink := newHandlerWithSink(t)
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	v1 := 1.0
+	d1 := int64(3)
+	body, _ := json.Marshal([]model.Metrics{
+		{ID: "Alloc", MType: model.Gauge, Value: &v1},
+		{ID: "PollCount", MType: model.Counter, Delta: &d1},
+	})
+	resp, err := http.Post(srv.URL+"/updates/", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	require.Len(t, sink.events, 1)
+	assert.Equal(t, []string{"Alloc", "PollCount"}, sink.events[0].Metrics)
+}
+
+func TestUpdateMetric_TextPlain_AuditEmits(t *testing.T) {
+	h, sink := newHandlerWithSink(t)
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/update/gauge/Alloc/3.14", "text/plain", nil)
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	require.Len(t, sink.events, 1)
+	assert.Equal(t, []string{"Alloc"}, sink.events[0].Metrics)
+}
+
+func TestUpdateMetricJSON_AuditNotEmittedOnError(t *testing.T) {
+	h, sink := newHandlerWithSink(t)
+	srv := newTestServer(h)
+	defer srv.Close()
+
+	body, _ := json.Marshal(model.Metrics{ID: "Bad", MType: "unknown"})
+	resp, err := http.Post(srv.URL+"/update", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	assert.Empty(t, sink.events)
 }
