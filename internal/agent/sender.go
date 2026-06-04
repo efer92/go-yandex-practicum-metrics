@@ -1,33 +1,43 @@
 package agent
 
 import (
+	"bytes"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
+	"github.com/efer92/go-yandex-practicum-metrics/internal/middleware"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/compress"
+	"github.com/efer92/go-yandex-practicum-metrics/pkg/crypto"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/hash"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/retry"
 )
 
 const headerHashSHA256 = "HashSHA256"
 
-// Sender posts collected metrics to the server, optionally signing them with HMAC-SHA256.
+// Sender posts collected metrics to the server, optionally signing them with HMAC-SHA256
+// and optionally encrypting bodies with an RSA public key.
 type Sender struct {
 	serverURL  string
 	httpClient *http.Client
 	key        string
+	pubKey     *rsa.PublicKey
 }
 
-// NewSender returns a Sender targeted at serverURL; key enables HMAC-SHA256 signing when non-empty.
-func NewSender(serverURL string, key string) *Sender {
+// NewSender returns a Sender targeted at serverURL.
+//   - key enables HMAC-SHA256 signing when non-empty.
+//   - pubKey enables RSA-OAEP+AES-GCM encryption of request bodies when non-nil.
+func NewSender(serverURL string, key string, pubKey *rsa.PublicKey) *Sender {
 	return &Sender{
 		serverURL:  serverURL,
 		httpClient: &http.Client{},
 		key:        key,
+		pubKey:     pubKey,
 	}
 }
 
@@ -40,23 +50,36 @@ func isRetriableHTTPError(err error) bool {
 	return false
 }
 
-// newRequest создаёт POST-запрос с gzip-телом и опциональной подписью HashSHA256.
+// newRequest builds a POST request with a gzip-compressed body, an optional
+// HashSHA256 signature, and optional RSA-OAEP+AES-GCM encryption when a public
+// key is configured.
 func (s *Sender) newRequest(url string, body []byte) (*http.Request, error) {
-	buf, err := compress.GzipData(body)
+	gz, err := compress.GzipData(body)
 	if err != nil {
 		return nil, fmt.Errorf("compress: %w", err)
 	}
 
-	// buf — io.Reader после GzipData; нам нужны raw bytes для подписи,
-	// поэтому подписываем исходный body (до сжатия), как требует задание:
-	// hash считается от тела запроса (JSON), а не от сжатых байт.
-	req, err := http.NewRequest(http.MethodPost, url, buf)
+	var reqBody io.Reader = gz
+	encrypted := false
+	if s.pubKey != nil {
+		envelope, err := crypto.Encrypt(s.pubKey, gz.Bytes())
+		if err != nil {
+			return nil, fmt.Errorf("encrypt: %w", err)
+		}
+		reqBody = bytes.NewReader(envelope)
+		encrypted = true
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+	if encrypted {
+		req.Header.Set(middleware.HeaderCryptoEncrypted, "1")
+	}
 
 	if s.key != "" {
 		req.Header.Set(headerHashSHA256, hash.Sign(body, s.key))

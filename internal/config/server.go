@@ -18,6 +18,7 @@ type ServerConfig struct {
 	Key             string
 	AuditFile       string
 	AuditURL        string
+	CryptoKey       string
 }
 
 // ParseServerConfig reads flags from args, then overlays the corresponding environment variables.
@@ -33,6 +34,7 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs.StringVar(&cfg.Key, "k", "", "Signing key for HMAC-SHA256")
 	fs.StringVar(&cfg.AuditFile, "audit-file", "", "Audit log file path (audit disabled if empty)")
 	fs.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log HTTP observer URL (audit disabled if empty)")
+	fs.StringVar(&cfg.CryptoKey, "crypto-key", "", "Path to PEM-encoded RSA private key for decrypting agent payloads")
 	fs.Parse(args)
 
 	if env, ok := os.LookupEnv("ADDRESS"); ok {
@@ -66,6 +68,9 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	}
 	if env, ok := os.LookupEnv("AUDIT_URL"); ok {
 		cfg.AuditURL = env
+	}
+	if env, ok := os.LookupEnv("CRYPTO_KEY"); ok {
+		cfg.CryptoKey = env
 	}
 
 	return cfg, nil
