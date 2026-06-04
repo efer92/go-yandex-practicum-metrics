@@ -16,6 +16,7 @@ import (
 	custommiddleware "github.com/efer92/go-yandex-practicum-metrics/internal/middleware"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/repository"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/service"
+	"github.com/efer92/go-yandex-practicum-metrics/pkg/buildinfo"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
@@ -56,7 +57,16 @@ func buildAuditPublisher(cfg config.ServerConfig, logger *zap.Logger) (*audit.Pu
 	return audit.NewPublisher(logger, observers...), nil
 }
 
+// Populated via -ldflags "-X main.buildVersion=… -X main.buildDate=… -X main.buildCommit=…".
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
 func main() {
+	buildinfo.Print(os.Stdout, buildVersion, buildDate, buildCommit)
+
 	cfg, err := config.ParseServerConfig(os.Args[1:])
 	if err != nil {
 		log.Fatalf("invalid config: %v", err)

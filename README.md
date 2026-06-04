@@ -582,6 +582,24 @@ func (rs *ResetableStruct) Reset() {
 Метод Put() структуры Pool, который помещает объект в пул.
 ```
 
+## Инкремент 23
+
+Добавьте в пакет cmd/server и cmd/agent (для трека «Сервис сбора метрик и алертинга») глобальные переменные:
+
+```bash
+var buildVersion string,
+var buildDate string,
+var buildCommit string.
+```
+
+При старте приложения выводите в stdout сообщение в следующем формате:
+
+```bash
+Build version: <buildVersion> (или "N/A" при отсутствии значения)
+Build date: <buildDate> (или "N/A" при отсутствии значения)
+Build commit: <buildCommit> (или "N/A" при отсутствии значения)
+```
+
 # Начало работы
 
 Выполните:

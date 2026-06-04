@@ -10,10 +10,20 @@ import (
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/agent"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/config"
+	"github.com/efer92/go-yandex-practicum-metrics/pkg/buildinfo"
 	"go.uber.org/zap"
 )
 
+// Populated via -ldflags "-X main.buildVersion=… -X main.buildDate=… -X main.buildCommit=…".
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
 func main() {
+	buildinfo.Print(os.Stdout, buildVersion, buildDate, buildCommit)
+
 	cfg, err := config.ParseAgentConfig(os.Args[1:])
 	if err != nil {
 		log.Fatalf("invalid config: %v", err)
