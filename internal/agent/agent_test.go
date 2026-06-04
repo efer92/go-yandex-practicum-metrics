@@ -291,6 +291,32 @@ func TestAgent_RateLimitRespected(t *testing.T) {
 	}
 }
 
+// TestAgent_FlushesOnContextCancel ensures Run delivers at least one batch
+// after ctx is cancelled before its report ticker would naturally fire.
+func TestAgent_FlushesOnContextCancel(t *testing.T) {
+	var received atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// poll fast so a snapshot exists; report interval long enough that no
+	// scheduled tick will fire — the only way received > 0 is the flush.
+	ag := NewWithConfig(server.URL, 20*time.Millisecond, 10*time.Second, zap.NewNop(), "", 1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		cancel()
+	}()
+	ag.Run(ctx)
+
+	if received.Load() == 0 {
+		t.Error("expected at least one batch to be flushed before exit")
+	}
+}
+
 // ─── convertToModelMetrics ────────────────────────────────────────────────────
 
 func TestConvertToModelMetrics(t *testing.T) {

@@ -117,8 +117,9 @@ func (a *Agent) runCollectExtra(ctx context.Context) {
 	}
 }
 
-// runReport периодически снимает снапшот и кладёт его в канал jobs.
-// Закрывает jobs при выходе — воркеры узнают о завершении через закрытый канал.
+// runReport periodically snapshots metrics and sends them to jobs.
+// On ctx cancellation a final flush snapshot is pushed before returning,
+// so workers (which drain jobs until close) deliver the last batch.
 func (a *Agent) runReport(ctx context.Context, jobs chan<- []model.Metrics) {
 	ticker := time.NewTicker(a.reportInterval)
 	defer ticker.Stop()
@@ -126,6 +127,8 @@ func (a *Agent) runReport(ctx context.Context, jobs chan<- []model.Metrics) {
 	for {
 		select {
 		case <-ctx.Done():
+			a.log.Info("flushing final metrics before shutdown")
+			jobs <- convertToModelMetrics(a.collector.GetSnapshot())
 			return
 		case <-ticker.C:
 			snapshot := a.collector.GetSnapshot()
@@ -133,26 +136,23 @@ func (a *Agent) runReport(ctx context.Context, jobs chan<- []model.Metrics) {
 			select {
 			case jobs <- metrics:
 			case <-ctx.Done():
+				a.log.Info("flushing final metrics before shutdown")
+				jobs <- metrics
 				return
 			}
 		}
 	}
 }
 
-func (a *Agent) worker(ctx context.Context, jobs <-chan []model.Metrics) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case metrics, ok := <-jobs:
-			if !ok {
-				return
-			}
-			if err := a.sender.SendBatch(metrics); err != nil {
-				a.log.Error("failed to send batch", zap.Error(err))
-			} else {
-				a.log.Debug("metrics batch sent", zap.Int("count", len(metrics)))
-			}
+// worker drains jobs until the channel is closed, regardless of ctx.
+// This guarantees that anything runReport pushed (including the final flush)
+// gets a delivery attempt during graceful shutdown.
+func (a *Agent) worker(_ context.Context, jobs <-chan []model.Metrics) {
+	for metrics := range jobs {
+		if err := a.sender.SendBatch(metrics); err != nil {
+			a.log.Error("failed to send batch", zap.Error(err))
+		} else {
+			a.log.Debug("metrics batch sent", zap.Int("count", len(metrics)))
 		}
 	}
 }

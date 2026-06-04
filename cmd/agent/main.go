@@ -39,7 +39,7 @@ func main() {
 		_ = logger.Sync()
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()
 
 	var pubKey *rsa.PublicKey

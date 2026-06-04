@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/middleware"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
@@ -35,7 +36,7 @@ type Sender struct {
 func NewSender(serverURL string, key string, pubKey *rsa.PublicKey) *Sender {
 	return &Sender{
 		serverURL:  serverURL,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 		key:        key,
 		pubKey:     pubKey,
 	}
