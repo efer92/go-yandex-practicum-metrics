@@ -12,6 +12,7 @@ import (
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // ─── Collector ────────────────────────────────────────────────────────────────
@@ -314,6 +315,44 @@ func TestAgent_FlushesOnContextCancel(t *testing.T) {
 
 	if received.Load() == 0 {
 		t.Error("expected at least one batch to be flushed before exit")
+	}
+}
+
+// TestAgent_FinalFlushHappensExactlyOnce locks in the invariant that runReport
+// can fire its "flushing final metrics before shutdown" branch at most once
+// per Run: the outer-ctx-done branch returns immediately, and the inner
+// branch (triggered when send-to-jobs raced with ctx cancel) also returns.
+// Even with a short report ticker and an immediate ctx cancel, the flush
+// log message must appear exactly once.
+func TestAgent_FinalFlushHappensExactlyOnce(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	core, observed := observer.New(zap.InfoLevel)
+	logger := zap.New(core)
+
+	// Tight loop so the runReport for-select iterates many times; the
+	// reportInterval is small so the inner send-to-jobs path is also exercised.
+	ag := NewWithConfig(server.URL, 5*time.Millisecond, 5*time.Millisecond, logger, "", 1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+	}()
+	ag.Run(ctx)
+
+	const msg = "flushing final metrics before shutdown"
+	got := 0
+	for _, entry := range observed.All() {
+		if entry.Message == msg {
+			got++
+		}
+	}
+	if got != 1 {
+		t.Errorf("flush log fired %d times, want exactly 1", got)
 	}
 }
 
