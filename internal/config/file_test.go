@@ -120,8 +120,9 @@ func TestExtractConfigPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// extractConfigPath treats an empty CONFIG as "unset";
+			// t.Setenv also schedules a clean restore at test end.
 			t.Setenv("CONFIG", "")
-			os.Unsetenv("CONFIG")
 			assert.Equal(t, tc.want, extractConfigPath(tc.args))
 		})
 	}

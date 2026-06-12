@@ -9,16 +9,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
-	"github.com/efer92/go-yandex-practicum-metrics/internal/middleware"
+	"github.com/efer92/go-yandex-practicum-metrics/internal/httpconst"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/compress"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/crypto"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/hash"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/retry"
 )
-
-const headerHashSHA256 = "HashSHA256"
 
 // Sender posts collected metrics to the server, optionally signing them with HMAC-SHA256
 // and optionally encrypting bodies with an RSA public key.
@@ -35,7 +34,7 @@ type Sender struct {
 func NewSender(serverURL string, key string, pubKey *rsa.PublicKey) *Sender {
 	return &Sender{
 		serverURL:  serverURL,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 		key:        key,
 		pubKey:     pubKey,
 	}
@@ -78,11 +77,11 @@ func (s *Sender) newRequest(url string, body []byte) (*http.Request, error) {
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
 	if encrypted {
-		req.Header.Set(middleware.HeaderCryptoEncrypted, "1")
+		req.Header.Set(httpconst.HeaderCryptoEncrypted, "1")
 	}
 
 	if s.key != "" {
-		req.Header.Set(headerHashSHA256, hash.Sign(body, s.key))
+		req.Header.Set(httpconst.HeaderHashSHA256, hash.Sign(body, s.key))
 	}
 
 	return req, nil

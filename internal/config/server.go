@@ -75,10 +75,14 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs.StringVar(&cfg.AuditFile, "audit-file", "", "Audit log file path (audit disabled if empty)")
 	fs.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log HTTP observer URL (audit disabled if empty)")
 	fs.StringVar(&cfg.CryptoKey, "crypto-key", cryptoKeyDefault, "Path to PEM-encoded RSA private key for decrypting agent payloads")
+	// configPathFlag is registered solely so fs.Parse does not error on
+	// the -c / -config user-facing flag — the actual value has already been
+	// consumed by extractConfigPath above.
 	var configPathFlag string
 	fs.StringVar(&configPathFlag, "c", "", "Path to JSON config file (overridden by CONFIG env)")
 	fs.StringVar(&configPathFlag, "config", "", "Path to JSON config file (overridden by CONFIG env)")
 	fs.Parse(args)
+	_ = configPathFlag
 
 	if env, ok := os.LookupEnv("ADDRESS"); ok {
 		cfg.Addr = env

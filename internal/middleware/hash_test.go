@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/efer92/go-yandex-practicum-metrics/internal/httpconst"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/hash"
 	"go.uber.org/zap"
 )
@@ -55,7 +56,7 @@ func TestHashMiddleware_WithKey_SignsResponse(t *testing.T) {
 		t.Errorf("expected 200, got %d", rr.Code)
 	}
 
-	responseHash := rr.Header().Get("HashSHA256")
+	responseHash := rr.Header().Get(httpconst.HeaderHashSHA256)
 	if responseHash == "" {
 		t.Fatal("expected HashSHA256 header in response")
 	}
@@ -74,7 +75,7 @@ func TestHashMiddleware_WithKey_ValidRequestHash_Passes(t *testing.T) {
 	sig := hash.Sign([]byte(body), key)
 
 	req := httptest.NewRequest(http.MethodPost, "/update", strings.NewReader(body))
-	req.Header.Set("HashSHA256", sig)
+	req.Header.Set(httpconst.HeaderHashSHA256, sig)
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -90,7 +91,7 @@ func TestHashMiddleware_WithKey_InvalidRequestHash_Returns400(t *testing.T) {
 
 	body := `{"id":"PollCount","type":"counter","delta":5}`
 	req := httptest.NewRequest(http.MethodPost, "/update", strings.NewReader(body))
-	req.Header.Set("HashSHA256", "0000000000000000000000000000000000000000000000000000000000000000")
+	req.Header.Set(httpconst.HeaderHashSHA256, "0000000000000000000000000000000000000000000000000000000000000000")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -113,7 +114,7 @@ func TestHashMiddleware_WithKey_NoRequestHash_Passes(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rr.Code)
 	}
-	if rr.Header().Get("HashSHA256") == "" {
+	if rr.Header().Get(httpconst.HeaderHashSHA256) == "" {
 		t.Error("expected HashSHA256 header in response even without request hash")
 	}
 }

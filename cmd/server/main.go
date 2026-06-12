@@ -85,7 +85,7 @@ func main() {
 		_ = logger.Sync()
 	}()
 
-	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()
 
 	g, ctx := errgroup.WithContext(sigCtx)

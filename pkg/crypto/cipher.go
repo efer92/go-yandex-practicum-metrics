@@ -15,12 +15,11 @@ import (
 //
 //	[2 bytes BE: wrapped-key length]
 //	[wrapped AES key (RSA-OAEP/SHA-256)]
-//	[12 bytes nonce]
+//	[nonce; length = gcm.NonceSize(), derived at decode time]
 //	[ciphertext || GCM tag]
 const (
 	wrappedLenBytes = 2
 	aesKeyBytes     = 32
-	nonceBytes      = 12
 )
 
 // Encrypt wraps plaintext using AES-256-GCM with a fresh random key, and
@@ -63,16 +62,14 @@ func Encrypt(pub *rsa.PublicKey, plaintext []byte) ([]byte, error) {
 // Decrypt reverses Encrypt. The envelope must have been produced by a peer
 // using the public key paired with priv.
 func Decrypt(priv *rsa.PrivateKey, envelope []byte) ([]byte, error) {
-	if len(envelope) < wrappedLenBytes+nonceBytes {
+	if len(envelope) < wrappedLenBytes {
 		return nil, fmt.Errorf("envelope too short: %d bytes", len(envelope))
 	}
 	keyLen := int(binary.BigEndian.Uint16(envelope[:wrappedLenBytes]))
-	if len(envelope) < wrappedLenBytes+keyLen+nonceBytes {
-		return nil, fmt.Errorf("envelope truncated")
+	if len(envelope) < wrappedLenBytes+keyLen {
+		return nil, fmt.Errorf("envelope truncated (wrapped key)")
 	}
 	wrapped := envelope[wrappedLenBytes : wrappedLenBytes+keyLen]
-	nonce := envelope[wrappedLenBytes+keyLen : wrappedLenBytes+keyLen+nonceBytes]
-	ciphertext := envelope[wrappedLenBytes+keyLen+nonceBytes:]
 
 	aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, priv, wrapped, nil)
 	if err != nil {
@@ -86,6 +83,16 @@ func Decrypt(priv *rsa.PrivateKey, envelope []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("aes gcm: %w", err)
 	}
+
+	// Derive nonce size from the GCM instance so changing the algorithm
+	// (or its parameters) does not silently misalign the slice math.
+	nonceSize := gcm.NonceSize()
+	if len(envelope) < wrappedLenBytes+keyLen+nonceSize {
+		return nil, fmt.Errorf("envelope truncated (nonce)")
+	}
+	nonce := envelope[wrappedLenBytes+keyLen : wrappedLenBytes+keyLen+nonceSize]
+	ciphertext := envelope[wrappedLenBytes+keyLen+nonceSize:]
+
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return nil, fmt.Errorf("aes-gcm open: %w", err)

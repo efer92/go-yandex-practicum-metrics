@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/efer92/go-yandex-practicum-metrics/internal/httpconst"
 	cryptopkg "github.com/efer92/go-yandex-practicum-metrics/pkg/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,7 +44,7 @@ func TestCryptoMiddleware_DecryptsBody(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(envelope))
-	req.Header.Set(HeaderCryptoEncrypted, "1")
+	req.Header.Set(httpconst.HeaderCryptoEncrypted, "1")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -79,7 +80,7 @@ func TestCryptoMiddleware_BadEnvelopeRejected(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/x", bytes.NewReader([]byte("not really an envelope")))
-	req.Header.Set(HeaderCryptoEncrypted, "1")
+	req.Header.Set(httpconst.HeaderCryptoEncrypted, "1")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
