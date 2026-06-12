@@ -16,6 +16,7 @@ type AgentConfig struct {
 	Key            string
 	RateLimit      int
 	CryptoKey      string
+	GRPCAddr       string
 }
 
 // ParseAgentConfig reads CLI flags, environment variables and an optional
@@ -25,6 +26,7 @@ func ParseAgentConfig(args []string) (AgentConfig, error) {
 	pollDefault := 2
 	reportDefault := 10
 	cryptoKeyDefault := ""
+	grpcAddrDefault := ""
 
 	if path := extractConfigPath(args); path != "" {
 		fc, err := loadAgentFile(path)
@@ -51,6 +53,9 @@ func ParseAgentConfig(args []string) (AgentConfig, error) {
 		if fc.CryptoKey != nil {
 			cryptoKeyDefault = *fc.CryptoKey
 		}
+		if fc.GRPCAddress != nil {
+			grpcAddrDefault = *fc.GRPCAddress
+		}
 	}
 
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
@@ -62,6 +67,7 @@ func ParseAgentConfig(args []string) (AgentConfig, error) {
 	fs.StringVar(&cfg.Key, "k", "", "Signing key for HMAC-SHA256")
 	fs.IntVar(&cfg.RateLimit, "l", 1, "Max concurrent outgoing requests")
 	fs.StringVar(&cfg.CryptoKey, "crypto-key", cryptoKeyDefault, "Path to PEM-encoded RSA public key for encrypting outgoing payloads")
+	fs.StringVar(&cfg.GRPCAddr, "grpc-address", grpcAddrDefault, "gRPC server address (empty = use HTTP transport)")
 	// configPathFlag is registered solely so fs.Parse does not error on
 	// the -c / -config user-facing flag — the actual value has already been
 	// consumed by extractConfigPath above.
@@ -100,6 +106,9 @@ func ParseAgentConfig(args []string) (AgentConfig, error) {
 	}
 	if env, ok := os.LookupEnv("CRYPTO_KEY"); ok {
 		cfg.CryptoKey = env
+	}
+	if env, ok := os.LookupEnv("GRPC_ADDRESS"); ok {
+		cfg.GRPCAddr = env
 	}
 
 	return cfg, nil

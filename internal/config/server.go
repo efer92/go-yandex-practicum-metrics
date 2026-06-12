@@ -23,6 +23,7 @@ type ServerConfig struct {
 	AuditURL        string
 	CryptoKey       string
 	TrustedSubnet   string
+	GRPCAddr        string
 }
 
 // ParseServerConfig reads CLI flags, environment variables and an optional
@@ -35,6 +36,7 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	dsnDefault := ""
 	cryptoKeyDefault := ""
 	trustedSubnetDefault := ""
+	grpcAddrDefault := ""
 
 	if path := extractConfigPath(args); path != "" {
 		fc, err := loadServerFile(path)
@@ -66,6 +68,9 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 		if fc.TrustedSubnet != nil {
 			trustedSubnetDefault = *fc.TrustedSubnet
 		}
+		if fc.GRPCAddress != nil {
+			grpcAddrDefault = *fc.GRPCAddress
+		}
 	}
 
 	fs := flag.NewFlagSet("server", flag.ExitOnError)
@@ -81,6 +86,7 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log HTTP observer URL (audit disabled if empty)")
 	fs.StringVar(&cfg.CryptoKey, "crypto-key", cryptoKeyDefault, "Path to PEM-encoded RSA private key for decrypting agent payloads")
 	fs.StringVar(&cfg.TrustedSubnet, "t", trustedSubnetDefault, "CIDR of the trusted subnet for incoming agents (empty = no restriction)")
+	fs.StringVar(&cfg.GRPCAddr, "grpc-address", grpcAddrDefault, "gRPC server address (empty = gRPC disabled)")
 	// configPathFlag is registered solely so fs.Parse does not error on
 	// the -c / -config user-facing flag — the actual value has already been
 	// consumed by extractConfigPath above.
@@ -127,6 +133,9 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	}
 	if env, ok := os.LookupEnv("TRUSTED_SUBNET"); ok {
 		cfg.TrustedSubnet = env
+	}
+	if env, ok := os.LookupEnv("GRPC_ADDRESS"); ok {
+		cfg.GRPCAddr = env
 	}
 
 	return cfg, nil

@@ -50,18 +50,35 @@ func main() {
 		}
 	}
 
-	ag := agent.NewWithConfig(
-		"http://"+cfg.Addr,
-		time.Duration(cfg.PollInterval)*time.Second,
-		time.Duration(cfg.ReportInterval)*time.Second,
-		logger,
-		cfg.Key,
-		cfg.RateLimit,
-		pubKey,
-	)
+	var ag *agent.Agent
+	if cfg.GRPCAddr != "" {
+		sender, err := agent.NewGRPCSender(cfg.GRPCAddr)
+		if err != nil {
+			log.Fatalf("grpc sender: %v", err)
+		}
+		defer sender.Close()
+		ag = agent.NewWithSender(
+			sender,
+			time.Duration(cfg.PollInterval)*time.Second,
+			time.Duration(cfg.ReportInterval)*time.Second,
+			logger,
+			cfg.RateLimit,
+		)
+	} else {
+		ag = agent.NewWithConfig(
+			"http://"+cfg.Addr,
+			time.Duration(cfg.PollInterval)*time.Second,
+			time.Duration(cfg.ReportInterval)*time.Second,
+			logger,
+			cfg.Key,
+			cfg.RateLimit,
+			pubKey,
+		)
+	}
 
 	logger.Info("agent started",
 		zap.String("server", cfg.Addr),
+		zap.String("grpc_server", cfg.GRPCAddr),
 		zap.Int("poll_interval", cfg.PollInterval),
 		zap.Int("report_interval", cfg.ReportInterval),
 		zap.Int("rate_limit", cfg.RateLimit),

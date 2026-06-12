@@ -13,3 +13,7 @@ const HeaderCryptoEncrypted = "X-Crypto-Encrypted"
 // HeaderXRealIP carries the agent host's IP address; the server validates it
 // against a trusted CIDR subnet when one is configured.
 const HeaderXRealIP = "X-Real-IP"
+
+// MetadataXRealIP is the gRPC metadata key carrying the agent's IP address
+// (gRPC metadata keys are lowercase by convention).
+const MetadataXRealIP = "x-real-ip"
