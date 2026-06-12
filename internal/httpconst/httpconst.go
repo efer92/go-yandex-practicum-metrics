@@ -9,3 +9,7 @@ const HeaderHashSHA256 = "HashSHA256"
 
 // HeaderCryptoEncrypted marks a request whose body is RSA-OAEP+AES-GCM encrypted.
 const HeaderCryptoEncrypted = "X-Crypto-Encrypted"
+
+// HeaderXRealIP carries the agent host's IP address; the server validates it
+// against a trusted CIDR subnet when one is configured.
+const HeaderXRealIP = "X-Real-IP"

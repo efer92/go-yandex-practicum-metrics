@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/efer92/go-yandex-practicum-metrics/internal/httpconst"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/model"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -239,6 +240,33 @@ func TestSender_SendMetrics_Error(t *testing.T) {
 }
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
+
+func TestSender_SetsXRealIPHeader(t *testing.T) {
+	var captured string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Get(httpconst.HeaderXRealIP)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	s := NewSender(server.URL, "", nil)
+	d := int64(1)
+	if err := s.SendBatch([]model.Metrics{{ID: "X", MType: model.Counter, Delta: &d}}); err != nil {
+		t.Fatalf("SendBatch: %v", err)
+	}
+
+	// detectLocalIPv4 returns "" on hosts without a non-loopback IPv4 (sandboxes,
+	// CI), in which case the agent intentionally leaves the header off.
+	if s.localIP == "" {
+		if captured != "" {
+			t.Errorf("header should be absent when local IP is unknown, got %q", captured)
+		}
+		return
+	}
+	if captured != s.localIP {
+		t.Errorf("X-Real-IP = %q, want %q", captured, s.localIP)
+	}
+}
 
 func TestAgent_WorkerSendsBatch(t *testing.T) {
 	var received atomic.Int32

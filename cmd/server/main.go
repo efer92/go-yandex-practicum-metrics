@@ -25,11 +25,16 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pinger, key string, publisher *audit.Publisher, privKey *rsa.PrivateKey) http.Handler {
+func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pinger, key string, publisher *audit.Publisher, privKey *rsa.PrivateKey, trustedSubnet func(http.Handler) http.Handler) http.Handler {
 	h := handler.NewMetricHandler(svc, logger, pinger, publisher)
 
 	r := chi.NewRouter()
 	r.Use(custommiddleware.Logger(logger))
+	// trustedSubnet first so we reject untrusted callers before doing any
+	// crypto or hashing work on a body we are going to throw away anyway.
+	if trustedSubnet != nil {
+		r.Use(trustedSubnet)
+	}
 	if m := custommiddleware.CryptoMiddleware(privKey, logger); m != nil {
 		r.Use(m)
 	}
@@ -156,9 +161,14 @@ func main() {
 		}
 	}
 
+	trustedSubnetMw, err := custommiddleware.TrustedSubnetMiddleware(cfg.TrustedSubnet, logger)
+	if err != nil {
+		log.Fatalf("trusted subnet: %v", err)
+	}
+
 	srv := &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      newRouter(svc, logger, pinger, cfg.Key, publisher, privKey),
+		Handler:      newRouter(svc, logger, pinger, cfg.Key, publisher, privKey, trustedSubnetMw),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -172,6 +182,7 @@ func main() {
 		zap.Bool("restore", cfg.Restore),
 		zap.String("audit_file", cfg.AuditFile),
 		zap.String("audit_url", cfg.AuditURL),
+		zap.String("trusted_subnet", cfg.TrustedSubnet),
 	)
 
 	g.Go(func() error {

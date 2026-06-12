@@ -23,7 +23,8 @@ func TestParseServerConfig_FromFile(t *testing.T) {
         "store_interval": "30s",
         "store_file": "/var/file.db",
         "database_dsn": "dsn://from-file",
-        "crypto_key": "/keys/priv.pem"
+        "crypto_key": "/keys/priv.pem",
+        "trusted_subnet": "10.0.0.0/8"
     }`)
 
 	cfg, err := ParseServerConfig([]string{"-c", path})
@@ -35,6 +36,18 @@ func TestParseServerConfig_FromFile(t *testing.T) {
 	assert.Equal(t, "/var/file.db", cfg.FileStoragePath)
 	assert.Equal(t, "dsn://from-file", cfg.DatabaseDSN)
 	assert.Equal(t, "/keys/priv.pem", cfg.CryptoKey)
+	assert.Equal(t, "10.0.0.0/8", cfg.TrustedSubnet)
+}
+
+func TestParseServerConfig_TrustedSubnetFlagAndEnv(t *testing.T) {
+	cfg, err := ParseServerConfig([]string{"-t", "192.168.0.0/16"})
+	require.NoError(t, err)
+	assert.Equal(t, "192.168.0.0/16", cfg.TrustedSubnet)
+
+	t.Setenv("TRUSTED_SUBNET", "172.16.0.0/12")
+	cfg, err = ParseServerConfig([]string{"-t", "192.168.0.0/16"})
+	require.NoError(t, err)
+	assert.Equal(t, "172.16.0.0/12", cfg.TrustedSubnet)
 }
 
 func TestParseServerConfig_FlagOverridesFile(t *testing.T) {
