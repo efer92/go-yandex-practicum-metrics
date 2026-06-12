@@ -10,6 +10,7 @@ import (
 // Pointer fields distinguish "absent in JSON" (nil) from "present and zero".
 type serverFile struct {
 	Address       *string `json:"address,omitempty"`
+	GRPCAddress   *string `json:"grpc_address,omitempty"`
 	Restore       *bool   `json:"restore,omitempty"`
 	StoreInterval *string `json:"store_interval,omitempty"`
 	StoreFile     *string `json:"store_file,omitempty"`
@@ -20,6 +21,7 @@ type serverFile struct {
 
 type agentFile struct {
 	Address        *string `json:"address,omitempty"`
+	GRPCAddress    *string `json:"grpc_address,omitempty"`
 	ReportInterval *string `json:"report_interval,omitempty"`
 	PollInterval   *string `json:"poll_interval,omitempty"`
 	CryptoKey      *string `json:"crypto_key,omitempty"`

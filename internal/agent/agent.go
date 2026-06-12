@@ -11,25 +11,37 @@ import (
 	"go.uber.org/zap"
 )
 
-// Agent owns a Collector and a Sender and coordinates the poll/report loops.
+// BatchSender delivers a batch of metrics to the server; implemented by the
+// HTTP Sender and the GRPCSender.
+type BatchSender interface {
+	SendBatch(metrics []model.Metrics) error
+}
+
+// Agent owns a Collector and a BatchSender and coordinates the poll/report loops.
 type Agent struct {
 	collector      *Collector
-	sender         *Sender
+	sender         BatchSender
 	pollInterval   time.Duration
 	reportInterval time.Duration
 	rateLimit      int
 	log            *zap.Logger
 }
 
-// NewWithConfig builds an Agent. The process is terminated with logger.Fatal when rateLimit <= 0.
+// NewWithConfig builds an Agent with the HTTP sender. The process is terminated
+// with logger.Fatal when rateLimit <= 0.
 // pubKey is optional; when non-nil the sender encrypts outgoing request bodies.
 func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration, logger *zap.Logger, key string, rateLimit int, pubKey *rsa.PublicKey) *Agent {
+	return NewWithSender(NewSender(serverURL, key, pubKey), pollInterval, reportInterval, logger, rateLimit)
+}
+
+// NewWithSender builds an Agent around an arbitrary BatchSender (e.g. GRPCSender).
+func NewWithSender(sender BatchSender, pollInterval, reportInterval time.Duration, logger *zap.Logger, rateLimit int) *Agent {
 	if rateLimit <= 0 {
 		logger.Fatal("rateLimit must be > 0", zap.Int("rateLimit", rateLimit))
 	}
 	return &Agent{
 		collector:      NewCollector(),
-		sender:         NewSender(serverURL, key, pubKey),
+		sender:         sender,
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
 		rateLimit:      rateLimit,

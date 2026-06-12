@@ -39,6 +39,27 @@ func TestParseServerConfig_FromFile(t *testing.T) {
 	assert.Equal(t, "10.0.0.0/8", cfg.TrustedSubnet)
 }
 
+func TestParseConfig_GRPCAddress(t *testing.T) {
+	// file < flag < env, same as every other option
+	srvPath := writeFile(t, `{"grpc_address": "file:3200"}`)
+	cfg, err := ParseServerConfig([]string{"-c", srvPath})
+	require.NoError(t, err)
+	assert.Equal(t, "file:3200", cfg.GRPCAddr)
+
+	cfg, err = ParseServerConfig([]string{"-c", srvPath, "-grpc-address", "flag:3201"})
+	require.NoError(t, err)
+	assert.Equal(t, "flag:3201", cfg.GRPCAddr)
+
+	t.Setenv("GRPC_ADDRESS", "env:3202")
+	cfg, err = ParseServerConfig([]string{"-grpc-address", "flag:3201"})
+	require.NoError(t, err)
+	assert.Equal(t, "env:3202", cfg.GRPCAddr)
+
+	acfg, err := ParseAgentConfig([]string{})
+	require.NoError(t, err)
+	assert.Equal(t, "env:3202", acfg.GRPCAddr)
+}
+
 func TestParseServerConfig_TrustedSubnetFlagAndEnv(t *testing.T) {
 	cfg, err := ParseServerConfig([]string{"-t", "192.168.0.0/16"})
 	require.NoError(t, err)

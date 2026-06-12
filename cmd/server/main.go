@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,8 +14,10 @@ import (
 
 	"github.com/efer92/go-yandex-practicum-metrics/internal/audit"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/config"
+	"github.com/efer92/go-yandex-practicum-metrics/internal/grpcserver"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/handler"
 	custommiddleware "github.com/efer92/go-yandex-practicum-metrics/internal/middleware"
+	pb "github.com/efer92/go-yandex-practicum-metrics/internal/proto"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/repository"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/service"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/buildinfo"
@@ -23,6 +26,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 )
 
 func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pinger, key string, publisher *audit.Publisher, privKey *rsa.PrivateKey, trustedSubnet func(http.Handler) http.Handler) http.Handler {
@@ -176,6 +180,7 @@ func main() {
 
 	logger.Info("server starting",
 		zap.String("addr", cfg.Addr),
+		zap.String("grpc_addr", cfg.GRPCAddr),
 		zap.String("database_dsn", cfg.DatabaseDSN),
 		zap.Int("store_interval", cfg.StoreInterval),
 		zap.String("file_storage_path", cfg.FileStoragePath),
@@ -192,12 +197,54 @@ func main() {
 		return nil
 	})
 
+	var grpcSrv *grpc.Server
+	if cfg.GRPCAddr != "" {
+		interceptor, err := grpcserver.TrustedSubnetInterceptor(cfg.TrustedSubnet)
+		if err != nil {
+			log.Fatalf("grpc trusted subnet: %v", err)
+		}
+		var opts []grpc.ServerOption
+		if interceptor != nil {
+			opts = append(opts, grpc.UnaryInterceptor(interceptor))
+		}
+		grpcSrv = grpc.NewServer(opts...)
+		pb.RegisterMetricsServer(grpcSrv, grpcserver.NewMetricsServer(svc))
+
+		lis, err := net.Listen("tcp", cfg.GRPCAddr)
+		if err != nil {
+			log.Fatalf("grpc listen %s: %v", cfg.GRPCAddr, err)
+		}
+		g.Go(func() error {
+			return grpcSrv.Serve(lis)
+		})
+	}
+
 	g.Go(func() error {
 		<-ctx.Done()
 		logger.Info("shutting down...")
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+
+		// GracefulStop waits for in-flight RPCs with no deadline of its own,
+		// so run it concurrently with the HTTP shutdown and bound both by the
+		// same budget; stragglers get a hard Stop.
+		if grpcSrv != nil {
+			stopped := make(chan struct{})
+			go func() {
+				grpcSrv.GracefulStop()
+				close(stopped)
+			}()
+			defer func() {
+				select {
+				case <-stopped:
+				case <-shutdownCtx.Done():
+					grpcSrv.Stop()
+					<-stopped
+				}
+			}()
+		}
+
 		return srv.Shutdown(shutdownCtx)
 	})
 
