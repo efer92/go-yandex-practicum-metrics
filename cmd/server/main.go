@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"errors"
 	"log"
 	"net/http"
@@ -17,17 +18,21 @@ import (
 	"github.com/efer92/go-yandex-practicum-metrics/internal/repository"
 	"github.com/efer92/go-yandex-practicum-metrics/internal/service"
 	"github.com/efer92/go-yandex-practicum-metrics/pkg/buildinfo"
+	"github.com/efer92/go-yandex-practicum-metrics/pkg/crypto"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
-func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pinger, key string, publisher *audit.Publisher) http.Handler {
+func newRouter(svc *service.MetricService, logger *zap.Logger, pinger handler.Pinger, key string, publisher *audit.Publisher, privKey *rsa.PrivateKey) http.Handler {
 	h := handler.NewMetricHandler(svc, logger, pinger, publisher)
 
 	r := chi.NewRouter()
 	r.Use(custommiddleware.Logger(logger))
+	if m := custommiddleware.CryptoMiddleware(privKey, logger); m != nil {
+		r.Use(m)
+	}
 	r.Use(custommiddleware.GzipMiddleware)
 	if m := custommiddleware.HashMiddleware(key, logger); m != nil {
 		r.Use(m)
@@ -143,9 +148,17 @@ func main() {
 		}()
 	}
 
+	var privKey *rsa.PrivateKey
+	if cfg.CryptoKey != "" {
+		privKey, err = crypto.LoadPrivateKey(cfg.CryptoKey)
+		if err != nil {
+			log.Fatalf("load crypto private key: %v", err)
+		}
+	}
+
 	srv := &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      newRouter(svc, logger, pinger, cfg.Key, publisher),
+		Handler:      newRouter(svc, logger, pinger, cfg.Key, publisher, privKey),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,

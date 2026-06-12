@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"crypto/rsa"
 	"sync"
 	"time"
 
@@ -21,13 +22,14 @@ type Agent struct {
 }
 
 // NewWithConfig builds an Agent. The process is terminated with logger.Fatal when rateLimit <= 0.
-func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration, logger *zap.Logger, key string, rateLimit int) *Agent {
+// pubKey is optional; when non-nil the sender encrypts outgoing request bodies.
+func NewWithConfig(serverURL string, pollInterval, reportInterval time.Duration, logger *zap.Logger, key string, rateLimit int, pubKey *rsa.PublicKey) *Agent {
 	if rateLimit <= 0 {
 		logger.Fatal("rateLimit must be > 0", zap.Int("rateLimit", rateLimit))
 	}
 	return &Agent{
 		collector:      NewCollector(),
-		sender:         NewSender(serverURL, key),
+		sender:         NewSender(serverURL, key, pubKey),
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
 		rateLimit:      rateLimit,
