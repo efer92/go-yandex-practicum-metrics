@@ -223,12 +223,28 @@ func main() {
 		<-ctx.Done()
 		logger.Info("shutting down...")
 
-		if grpcSrv != nil {
-			grpcSrv.GracefulStop()
-		}
-
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+
+		// GracefulStop waits for in-flight RPCs with no deadline of its own,
+		// so run it concurrently with the HTTP shutdown and bound both by the
+		// same budget; stragglers get a hard Stop.
+		if grpcSrv != nil {
+			stopped := make(chan struct{})
+			go func() {
+				grpcSrv.GracefulStop()
+				close(stopped)
+			}()
+			defer func() {
+				select {
+				case <-stopped:
+				case <-shutdownCtx.Done():
+					grpcSrv.Stop()
+					<-stopped
+				}
+			}()
+		}
+
 		return srv.Shutdown(shutdownCtx)
 	})
 
