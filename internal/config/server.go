@@ -22,6 +22,7 @@ type ServerConfig struct {
 	AuditFile       string
 	AuditURL        string
 	CryptoKey       string
+	TrustedSubnet   string
 }
 
 // ParseServerConfig reads CLI flags, environment variables and an optional
@@ -33,6 +34,7 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	restoreDefault := true
 	dsnDefault := ""
 	cryptoKeyDefault := ""
+	trustedSubnetDefault := ""
 
 	if path := extractConfigPath(args); path != "" {
 		fc, err := loadServerFile(path)
@@ -61,6 +63,9 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 		if fc.CryptoKey != nil {
 			cryptoKeyDefault = *fc.CryptoKey
 		}
+		if fc.TrustedSubnet != nil {
+			trustedSubnetDefault = *fc.TrustedSubnet
+		}
 	}
 
 	fs := flag.NewFlagSet("server", flag.ExitOnError)
@@ -75,6 +80,7 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	fs.StringVar(&cfg.AuditFile, "audit-file", "", "Audit log file path (audit disabled if empty)")
 	fs.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log HTTP observer URL (audit disabled if empty)")
 	fs.StringVar(&cfg.CryptoKey, "crypto-key", cryptoKeyDefault, "Path to PEM-encoded RSA private key for decrypting agent payloads")
+	fs.StringVar(&cfg.TrustedSubnet, "t", trustedSubnetDefault, "CIDR of the trusted subnet for incoming agents (empty = no restriction)")
 	// configPathFlag is registered solely so fs.Parse does not error on
 	// the -c / -config user-facing flag — the actual value has already been
 	// consumed by extractConfigPath above.
@@ -118,6 +124,9 @@ func ParseServerConfig(args []string) (ServerConfig, error) {
 	}
 	if env, ok := os.LookupEnv("CRYPTO_KEY"); ok {
 		cfg.CryptoKey = env
+	}
+	if env, ok := os.LookupEnv("TRUSTED_SUBNET"); ok {
+		cfg.TrustedSubnet = env
 	}
 
 	return cfg, nil

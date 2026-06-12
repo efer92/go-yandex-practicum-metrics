@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -26,18 +27,43 @@ type Sender struct {
 	httpClient *http.Client
 	key        string
 	pubKey     *rsa.PublicKey
+	localIP    string
 }
 
 // NewSender returns a Sender targeted at serverURL.
 //   - key enables HMAC-SHA256 signing when non-empty.
 //   - pubKey enables RSA-OAEP+AES-GCM encryption of request bodies when non-nil.
+//
+// The agent's local IPv4 address is detected once and sent in the X-Real-IP
+// header so the server can enforce a trusted-subnet policy.
 func NewSender(serverURL string, key string, pubKey *rsa.PublicKey) *Sender {
 	return &Sender{
 		serverURL:  serverURL,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 		key:        key,
 		pubKey:     pubKey,
+		localIP:    detectLocalIPv4(),
 	}
+}
+
+// detectLocalIPv4 returns the first non-loopback IPv4 address bound to a local
+// interface. An empty string is returned when no such address is found — in
+// that case the X-Real-IP header is left unset.
+func detectLocalIPv4() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok || ipnet.IP.IsLoopback() {
+			continue
+		}
+		if ip4 := ipnet.IP.To4(); ip4 != nil {
+			return ip4.String()
+		}
+	}
+	return ""
 }
 
 // isRetriableHTTPError возвращает true для временных сетевых ошибок соединения.
@@ -78,6 +104,9 @@ func (s *Sender) newRequest(url string, body []byte) (*http.Request, error) {
 	req.Header.Set("Accept-Encoding", "gzip")
 	if encrypted {
 		req.Header.Set(httpconst.HeaderCryptoEncrypted, "1")
+	}
+	if s.localIP != "" {
+		req.Header.Set(httpconst.HeaderXRealIP, s.localIP)
 	}
 
 	if s.key != "" {

@@ -15,6 +15,7 @@ type serverFile struct {
 	StoreFile     *string `json:"store_file,omitempty"`
 	DatabaseDSN   *string `json:"database_dsn,omitempty"`
 	CryptoKey     *string `json:"crypto_key,omitempty"`
+	TrustedSubnet *string `json:"trusted_subnet,omitempty"`
 }
 
 type agentFile struct {
